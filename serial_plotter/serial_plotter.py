@@ -1,8 +1,5 @@
 import asyncio
 import re
-import requests
-import sys
-import time
 
 import numpy as np
 import pandas as pd
@@ -15,7 +12,235 @@ import bokeh.io
 import bokeh.layouts
 import bokeh.driving
 
-from .boards import vid_pid_boards
+from . import boards
+from . import callbacks
+
+
+def plot():
+    """Build a plot of voltage vs time data"""
+    # Set up plot area
+    p = bokeh.plotting.figure(
+        frame_width=600,
+        frame_height=175,
+        x_axis_label="sample number",
+        y_axis_label=" ",
+        toolbar_location="above",
+        title="serial plotter",
+    )
+
+    # No range padding on x: signal spans whole plot
+    p.x_range.range_padding = 0
+
+    # We'll sue whitesmoke backgrounds
+    p.border_fill_color = "whitesmoke"
+
+    # Define the data source
+    source = bokeh.models.ColumnDataSource(data=dict(t=[], V=[]))
+
+    # If we are in streaming mode, use a line, dots for on-demand
+    p.line(source=source, x="t", y="V")
+
+    # Put a phantom circle so axis labels show before data arrive
+    phantom_source = bokeh.models.ColumnDataSource(
+        data=dict(phantom_t=[0], phantom_data=[0])
+    )
+    p.circle(source=phantom_source, x="phantom_t", y="phantom_data", visible=False)
+
+    return p, source, phantom_source
+
+
+def monitor():
+    """Print text of data coming in"""
+    monitor_text = """<div style="background-color: whitesmoke;">
+  <p style="margin-left: 50px; margin-bottom: 0px;">
+    <b>serial monitor</b>
+  </p>
+</div>
+<div style="border-style: solid; border-width: 10px; border-color: whitesmoke; background-color: white; width: 630px; height: 200px; overflow: scroll;">
+  <pre></pre></div>"""
+
+    return bokeh.models.Div(text=monitor_text, background="whitesmoke", width=650)
+
+
+def controls(serial_dict):
+    stream = bokeh.models.Toggle(label="stream", button_type="success", width=100)
+    clear = bokeh.models.Button(label="clear", button_type="warning", width=100)
+    stream_monitor = bokeh.models.Toggle(
+        label="stream", button_type="success", width=100
+    )
+    clear_monitor = bokeh.models.Button(label="clear", button_type="warning", width=100)
+    save = bokeh.models.Button(label="save", button_type="primary", width=100)
+    save_notice = bokeh.models.Div(text="<p>No data saved.</p>", width=165)
+    file_input = bokeh.models.TextInput(title="file name", value="_tmp.csv", width=165)
+    delimiter = bokeh.models.Select(
+        title="delimiter",
+        value="space",
+        options=[
+            "space",
+            "tab",
+            "comma",
+            "whitespace",
+            "vertical line",
+            "semicolon",
+            "asterisk",
+            "slash",
+        ],
+    )
+    rollover = bokeh.models.Select(
+        title="number of points on plot",
+        value="400",
+        options=["100", "200", "400", "800", "1000", "unlimited"],
+    )
+
+    # Set up port selector
+    port = bokeh.models.Select(title="port", options=[])
+
+    # Search for available ports and populate options
+    callbacks.port_search_callback(port, serial_dict)
+
+    # Set the selected port to the first one
+    if len(port.options) > 0:
+        serial_dict["port"] = list(serial_dict["available_ports"])[0]
+        port.value = serial_dict["port"]
+
+    # Set up baud rate with Arduino defaults
+    baudrate = bokeh.models.Select(
+        title="baud rate",
+        options=[
+            "300",
+            "1200",
+            "2400",
+            "4800",
+            "9600",
+            "19200",
+            "38400",
+            "57600",
+            "74880",
+            "115200",
+            "230400",
+            "250000",
+            "500000",
+            "1000000",
+            "2000000",
+        ],
+        value="115200",
+    )
+    callbacks.baudrate_callback(baudrate, serial_dict)
+
+    port_search = bokeh.models.Button(
+        label="refresh ports", button_type="primary", width=125
+    )
+    port_connect = bokeh.models.Button(
+        label="connect", button_type="success", width=125
+    )
+
+    port_status = bokeh.models.Div(
+        text="<p><b>port status:</b> disconnected</p>", width=200
+    )
+    serial_dict["port_status"] == "disconnected"
+
+    line_ending = bokeh.models.Select(
+        title="line ending",
+        value="Newline",
+        options=["No line ending", "Newline", "Carriage return", "Both NL & CR"],
+    )
+    time_column = bokeh.models.Select(
+        title="time column",
+        value="None",
+        options=["None", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+    )
+    time_units = bokeh.models.Select(
+        title="time units", value="None", options=["None", "µs", "ms", "s", "min", "hr"]
+    )
+    input_window = bokeh.models.TextInput(title="input", value="", width=180)
+    ascii_bytes = bokeh.models.RadioGroup(labels=["ascii", "bytes"], active=0)
+
+    return dict(
+        stream=stream,
+        clear=clear,
+        stream_monitor=stream_monitor,
+        clear_monitor=clear_monitor,
+        save=save,
+        save_notice=save_notice,
+        file_input=file_input,
+        delimiter=delimiter,
+        rollover=rollover,
+        port=port,
+        port_search=port_search,
+        baudrate=baudrate,
+        port_connect=port_connect,
+        port_status=port_status,
+        line_ending=line_ending,
+        time_column=time_column,
+        time_units=time_units,
+        input_window=input_window,
+        ascii_bytes=ascii_bytes,
+    )
+
+
+def layout(p, mon, ctrls):
+    plotter_buttons = bokeh.layouts.column(
+        bokeh.models.Spacer(height=50),
+        ctrls["stream"],
+        bokeh.models.Spacer(height=50),
+        ctrls["clear"],
+    )
+    plotter_layout = bokeh.layouts.row(
+        p,
+        bokeh.models.Spacer(width=10),
+        plotter_buttons,
+        bokeh.models.Spacer(width=15),
+        spacing=10,
+        margin=(30, 30, 30, 30),
+        background="whitesmoke",
+    )
+
+    input_layout = bokeh.layouts.row(
+        ctrls["input_window"],
+        bokeh.models.Spacer(width=20),
+        bokeh.layouts.column(bokeh.models.Spacer(height=15), ctrls["ascii_bytes"]),
+    )
+
+    specs = bokeh.layouts.column(
+        ctrls["port"],
+        ctrls["baudrate"],
+        bokeh.layouts.row(ctrls["port_search"], ctrls["port_connect"]),
+        ctrls["port_status"],
+        bokeh.models.Spacer(height=40),
+        ctrls["delimiter"],
+        bokeh.models.Spacer(height=10),
+        ctrls["line_ending"],
+        bokeh.models.Spacer(height=10),
+        ctrls["time_column"],
+        bokeh.models.Spacer(height=10),
+        ctrls["time_units"],
+        bokeh.models.Spacer(height=10),
+        ctrls["rollover"],
+        bokeh.models.Spacer(height=40),
+        input_layout,
+        width=200,
+    )
+
+    monitor_buttons = bokeh.layouts.column(
+        bokeh.models.Spacer(height=50),
+        ctrls["stream_monitor"],
+        bokeh.models.Spacer(height=50),
+        ctrls["clear_monitor"],
+    )
+    monitor_layout = bokeh.layouts.row(
+        mon,
+        bokeh.models.Spacer(width=10),
+        monitor_buttons,
+        bokeh.models.Spacer(width=15),
+        spacing=10,
+        margin=(30, 30, 30, 30),
+        background="whitesmoke",
+    )
+
+    return bokeh.layouts.row(
+        bokeh.layouts.column(plotter_layout, monitor_layout),
+        bokeh.layouts.column(bokeh.models.Spacer(height=10), specs),
+    )
 
 
 def find_board(port=None, quiet=True):
@@ -74,43 +299,6 @@ def find_board(port=None, quiet=True):
     return port
 
 
-def handshake_board(
-    ser, sleep_time=1, print_handshake_message=False, handshake_code=0
-):
-    """Make sure connection is established by sending and receiving
-    bytes."""
-    # Close and reopen
-    ser.close()
-    ser.open()
-
-    # Chill out while everything gets set
-    time.sleep(sleep_time)
-
-    # Set a long timeout to complete handshake
-    timeout = ser.timeout
-    ser.timeout = 2
-
-    # Read and discard everything that may be in the input buffer
-    _ = ser.read_all()
-
-    # Send request to board
-    ser.write(bytes([handshake_code]))
-
-    # Read in what board sent
-    handshake_message = ser.read_until()
-
-    # Send and receive request again
-    ser.write(bytes([handshake_code]))
-    handshake_message = ser.read_until()
-
-    # Print the handshake message, if desired
-    if print_handshake_message:
-        print("Handshake message: " + handshake_message.decode())
-
-    # Reset the timeout
-    ser.timeout = timeout
-
-
 def read_all(ser, read_buffer=b"", **args):
     """Read all available bytes from the serial port
     and append to the read buffer.
@@ -146,7 +334,7 @@ def read_all(ser, read_buffer=b"", **args):
     return read_buffer + read
 
 
-def read_all_newlines(ser, read_buffer=b"", n_reads=4):
+def read_all_newlines(ser, read_buffer=b"", n_reads=1):
     """Read data in until encountering newlines.
 
     Parameters
@@ -174,7 +362,25 @@ def read_all_newlines(ser, read_buffer=b"", n_reads=4):
     return raw
 
 
-def parse_read(read, sep=" ", time_column=None, n_reads=0):
+def time_in_ms(t, time_units):
+    if t.isdecimal():
+        t = int(t)
+    else:
+        t = float(t)
+
+    if time_units == "ms":
+        return t
+    elif time_units == "s":
+        return t * 1000
+    elif time_units == "µs":
+        return t / 1000 if t % 1000 else t // 1000
+    elif time_units == "min":
+        return t * 60000
+    elif time_units == "hr":
+        return t * 360000
+
+
+def parse_read(read, sep=" ", time_column=None, time_units="ms", n_reads=0):
     """Parse a read with time, voltage data
 
     Parameters
@@ -188,6 +394,10 @@ def parse_read(read, sep=" ", time_column=None, n_reads=0):
         If int, the index of the column of read-in data that contains
         the time in milliseconds. If None, then no time is read in, and
         the read number is stored in the `time_ms` output.
+    time_units : str, default "ms"
+        One of [None, 'µs', 'ms', 's', 'min', 'hr']. All times are
+        converted to milliseconds, except for None, which is only
+        allowed when time_column is None.
     n_reads : int, default 0
         The number of reads that have previously been read in.
 
@@ -212,11 +422,17 @@ def parse_read(read, sep=" ", time_column=None, n_reads=0):
 
     for raw in raw_list[:-1]:
         try:
-            data = raw.split(sep)
+            read_data = raw.split(sep)
+            data.append(
+                [
+                    int(datum) if datum.isdecimal() else float(datum)
+                    for datum in read_data
+                ]
+            )
             if time_column is None:
                 time_ms.append(n_reads)
             else:
-                time_ms.append(int(data.pop(time_column)))
+                time_ms.append(time_in_ms(read_data.pop(time_column), time_units))
             n_reads += 1
         except:
             pass
@@ -227,34 +443,9 @@ def parse_read(read, sep=" ", time_column=None, n_reads=0):
         return time_ms, data, n_reads, raw_list[-1].encode()
 
 
-def plot():
-    """Build a plot of data vs time data"""
-    # Set up plot area
-    p = bokeh.plotting.figure(
-        frame_width=500,
-        frame_height=175,
-        x_axis_label="time (s)",
-        y_axis_label="voltage (V)",
-        y_range=[-5, 1029],
-        toolbar_location="above",
-    )
-
-    # No range padding on x: signal spans whole plot
-    p.x_range.range_padding = 0
-
-    # We'll sue whitesmoke backgrounds
-    p.border_fill_color = "whitesmoke"
-
-    # Put a phantom circle so axis labels show before data arrive
-    phantom_source = bokeh.models.ColumnDataSource(data=dict(phantom_t=[0], phantom_data=[0]))
-    p.circle(source=phantom_source, x="phantom_t", y="phantom_data", visible=False)
-
-    return p, source, phantom_source
-
-
-def populate_glyphs(data)
+def populate_glyphs(data):
     # Define the data source
-    data_dict = {'data' + str(i): [] for i in range(n_data)}
+    data_dict = {"data" + str(i): [] for i in range(n_data)}
     data_dict["t"] = []
     source = bokeh.models.ColumnDataSource(data=data_dict)
 
@@ -263,52 +454,11 @@ def populate_glyphs(data)
         p.line(source=source, x="t", y="data" + str(i))
 
 
-
-def controls(mode):
-    acquire = bokeh.models.Toggle(label="stream", button_type="success", width=100)
-    save_notice = bokeh.models.Div(
-        text="<p>No streaming data saved.</p>", width=165
-    )
-
-    save = bokeh.models.Button(label="save", button_type="primary", width=100)
-    reset = bokeh.models.Button(label="reset", button_type="warning", width=100)
-    file_input = bokeh.models.TextInput(
-        title="file name", value=f"{mode}.csv", width=165
-    )
-
-    return dict(
-        acquire=acquire,
-        reset=reset,
-        save=save,
-        file_input=file_input,
-        save_notice=save_notice,
-    )
-
-
-def layout(p, ctrls):
-    buttons = bokeh.layouts.row(
-        bokeh.models.Spacer(width=30),
-        ctrls["acquire"],
-        bokeh.models.Spacer(width=295),
-        ctrls["reset"],
-    )
-    left = bokeh.layouts.column(p, buttons, spacing=15)
-    right = bokeh.layouts.column(
-        bokeh.models.Spacer(height=50),
-        ctrls["file_input"],
-        ctrls["save"],
-        ctrls["save_notice"],
-    )
-    return bokeh.layouts.row(
-        left, right, spacing=30, margin=(30, 30, 30, 30), background="whitesmoke",
-    )
-
-
-def stream_callback(ser, stream_data, new):
+def stream_callback(ser, plot_data, new):
     if new:
-        stream_data["mode"] = "stream"
+        plot_data["mode"] = "stream"
     else:
-        stream_data["mode"] = "ignore"
+        plot_data["mode"] = "ignore"
 
     ser.reset_input_buffer()
 
@@ -327,42 +477,17 @@ def reset_callback(mode, data, source, phantom_source, controls):
     phantom_source.data = dict(t=[0], V=[0])
 
 
-def data_dict()
-
 async def daq_stream_async(
-    arduino,
-    data,
-    delay=20,
-    n_trash_reads=5,
-    n_reads_per_chunk=4,
-    reader=read_all_newlines,
+    ser, plot_data, monitor_data, delay=20, n_reads_per_chunk=1, reader=read_all,
 ):
     """Obtain streaming data"""
-    # Specify delay
-    arduino.write(bytes([READ_DAQ_DELAY]) + (str(delay) + "x").encode())
-
-    # Current streaming state
-    stream_on = False
-
     # Receive data
     read_buffer = [b""]
     while True:
-        if data["mode"] == "stream":
-            # Turn on the stream if need be
-            if not stream_on:
-                arduino.write(bytes([STREAM]))
+        # Read in chunk of data
+        raw = reader(ser, read_buffer=read_buffer[0], n_reads=n_reads_per_chunk)
 
-                # Read and throw out first few reads
-                i = 0
-                while i < n_trash_reads:
-                    _ = arduino.read_until()
-                    i += 1
-
-                stream_on = True
-
-            # Read in chunk of data
-            raw = reader(arduino, read_buffer=read_buffer[0], n_reads=n_reads_per_chunk)
-
+        if plot_data["streaming"]:
             # Parse it, passing if it is gibberish
             try:
                 t, V, read_buffer[0] = parse_read(raw)
@@ -372,10 +497,76 @@ async def daq_stream_async(
                 data["V"] += V
             except:
                 pass
-        else:
-            # Make sure stream is off
-            stream_on = False
+
+        if monitor_data["streaming"]:
+            monitor_data["data"] += raw.decode()
 
         # Sleep 80% of the time before we need to start reading chunks
         await asyncio.sleep(0.8 * n_reads_per_chunk * delay / 1000)
 
+
+def plot_update(plot_data, source, phantom_source, rollover):
+    # Update plot by streaming in data
+    new_data = {
+        "t": np.array(data["t"][data["prev_array_length"] :]) / 1000,
+        "V": data["V"][data["prev_array_length"] :],
+    }
+    source.stream(new_data, rollover)
+
+    # Adjust new phantom data point if new data arrived
+    if len(new_data["t"] > 0):
+        phantom_source.data = dict(t=[new_data["t"][-1]], V=[new_data["V"][-1]])
+    data["prev_array_length"] = len(data["t"])
+
+
+def app():
+    def _app(doc):
+        # "Global" variables
+        serial_dict = dict(
+            ser=None,
+            port=None,
+            baudrate=None,
+            available_ports=dict(),
+            reverse_available_ports=dict(),
+            port_status="disconnected",
+        )
+        plot_data = dict(prev_array_length=0, t=[], data=[], streaming=False)
+        monitor_data = dict(data=[], streaming=False)
+
+        p, source, phantom_source = plot()
+        mon = monitor()
+        ctrls = controls(serial_dict)
+        app_layout = layout(p, mon, ctrls)
+
+        def _port_select_callback(attr, old, new):
+            callbacks.port_select_callback(ctrls["port"], serial_dict)
+
+        def _port_search_callback(event=None):
+            callbacks.port_search_callback(ctrls["port"], serial_dict)
+
+        def _port_connect_callback(event=None):
+            callbacks.port_connect_callback(ctrls["port_status"], serial_dict)
+
+        def _baudrate_callback(attr, old, new):
+            callbacks.baudrate_callback(ctrls["baudrate"], serial_dict)
+
+        def _input_window_callback(attr, old, new):
+            callbacks.input_window_callback(
+                ctrls["input_window"], ctrls["ascii_bytes"], serial_dict["ser"]
+            )
+
+        # @bokeh.driving.linear()
+        # def _stream_update(step):
+        #     stream_update(plot_data, stream_source, stream_phantom_source, rollover)
+
+        # Link callbacks
+        ctrls["port"].on_change("value", _port_select_callback)
+        ctrls["port_search"].on_click(_port_search_callback)
+        ctrls["port_connect"].on_click(_port_connect_callback)
+        ctrls["baudrate"].on_change("value", _baudrate_callback)
+        ctrls["input_window"].on_change("value", _input_window_callback)
+
+        # Add the layout to the app
+        doc.add_root(app_layout)
+
+    return _app

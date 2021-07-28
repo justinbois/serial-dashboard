@@ -181,6 +181,7 @@ vid_pid_boards = {
     "239A:000D": "Adafruit ItsyBitsy 32u4 3V 8MHz",
     "239A:800A": "Adafruit Bluefruit Micro",
     "239A:8001": "Adafruit 32u4 Breakout",
+    "16C0:0483": "Teensy 4.0",
 }
 
 
