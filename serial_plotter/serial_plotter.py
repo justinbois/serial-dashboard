@@ -23,7 +23,7 @@ def plot():
     p = bokeh.plotting.figure(
         frame_width=600,
         frame_height=175,
-        x_axis_label="sample number",
+        x_axis_label="sample_number",
         y_axis_label=" ",
         toolbar_location="above",
         title="serial plotter",
@@ -35,19 +35,13 @@ def plot():
     # We'll sue whitesmoke backgrounds
     p.border_fill_color = "whitesmoke"
 
-    # Define the data source
-    source = bokeh.models.ColumnDataSource(data=dict(t=[], V=[]))
-
-    # If we are in streaming mode, use a line, dots for on-demand
-    p.line(source=source, x="t", y="V")
-
     # Put a phantom circle so axis labels show before data arrive
     phantom_source = bokeh.models.ColumnDataSource(
-        data=dict(phantom_t=[0], phantom_data=[0])
+        data=dict(phantom_t=[0], phantom_y=[0])
     )
-    p.circle(source=phantom_source, x="phantom_t", y="phantom_data", visible=False)
+    p.circle(source=phantom_source, x="phantom_t", y="phantom_y", visible=False)
 
-    return p, source, phantom_source
+    return p, phantom_source
 
 
 def monitor():
@@ -143,22 +137,22 @@ def monitor():
 
 
 def controls(serial_dict):
-    stream = bokeh.models.Toggle(label="stream", button_type="success", width=100)
-    clear = bokeh.models.Button(label="clear", button_type="warning", width=100)
-    stream_monitor = bokeh.models.Toggle(
+    plot_stream = bokeh.models.Toggle(label="stream", button_type="success", width=100)
+    plot_clear = bokeh.models.Button(label="clear", button_type="warning", width=100)
+    monitor_stream = bokeh.models.Toggle(
         label="stream", button_type="success", width=100
     )
-    clear_monitor = bokeh.models.Button(label="clear", button_type="warning", width=100)
+    monitor_clear = bokeh.models.Button(label="clear", button_type="warning", width=100)
     save = bokeh.models.Button(label="save", button_type="primary", width=100)
     save_notice = bokeh.models.Div(text="<p>No data saved.</p>", width=165)
     file_input = bokeh.models.TextInput(title="file name", value="_tmp.csv", width=165)
     delimiter = bokeh.models.Select(
         title="delimiter",
-        value="space",
+        value="comma",
         options=[
+            "comma",
             "space",
             "tab",
-            "comma",
             "whitespace",
             "vertical line",
             "semicolon",
@@ -171,14 +165,12 @@ def controls(serial_dict):
         value="400",
         options=["100", "200", "400", "800", "1000", "unlimited"],
     )
+    max_cols = bokeh.models.Spinner(
+        title="max columns in input", value=10, low=1, high=10, step=1
+    )
 
     # Set up port selector
-    port = bokeh.models.Select(title="port", options=[])
-
-    # Set the selected port to the first one
-    if len(port.options) > 0:
-        serial_dict["port"] = list(serial_dict["available_ports"])[0]
-        port.value = serial_dict["port"]
+    port = bokeh.models.Select(title="port", options=[], value="")
 
     # Set up baud rate with Arduino defaults
     baudrate = bokeh.models.Select(
@@ -216,27 +208,22 @@ def controls(serial_dict):
     )
     serial_dict["port_status"] == "disconnected"
 
-    line_ending = bokeh.models.Select(
-        title="line ending",
-        value="Newline",
-        options=["No line ending", "Newline", "Carriage return", "Both NL & CR"],
-    )
     time_column = bokeh.models.Select(
         title="time column",
         value="None",
         options=["None", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
     )
     time_units = bokeh.models.Select(
-        title="time units", value="None", options=["None", "µs", "ms", "s", "min", "hr"]
+        title="time units", value="ms", options=["None", "µs", "ms", "s", "min", "hr"]
     )
     input_window = bokeh.models.TextInput(title="input", value="", width=180)
     ascii_bytes = bokeh.models.RadioGroup(labels=["ascii", "bytes"], active=0)
 
     return dict(
-        stream=stream,
-        clear=clear,
-        stream_monitor=stream_monitor,
-        clear_monitor=clear_monitor,
+        plot_stream=plot_stream,
+        plot_clear=plot_clear,
+        monitor_stream=monitor_stream,
+        monitor_clear=monitor_clear,
         save=save,
         save_notice=save_notice,
         file_input=file_input,
@@ -247,8 +234,8 @@ def controls(serial_dict):
         port_connect=port_connect,
         port_disconnect=port_disconnect,
         port_status=port_status,
-        line_ending=line_ending,
         time_column=time_column,
+        max_cols=max_cols,
         time_units=time_units,
         input_window=input_window,
         ascii_bytes=ascii_bytes,
@@ -258,9 +245,9 @@ def controls(serial_dict):
 def layout(p, mon, ctrls):
     plotter_buttons = bokeh.layouts.column(
         bokeh.models.Spacer(height=50),
-        ctrls["stream"],
+        ctrls["plot_stream"],
         bokeh.models.Spacer(height=50),
-        ctrls["clear"],
+        ctrls["plot_clear"],
     )
     plotter_layout = bokeh.layouts.row(
         p,
@@ -286,7 +273,7 @@ def layout(p, mon, ctrls):
         bokeh.models.Spacer(height=40),
         ctrls["delimiter"],
         bokeh.models.Spacer(height=10),
-        ctrls["line_ending"],
+        ctrls["max_cols"],
         bokeh.models.Spacer(height=10),
         ctrls["time_column"],
         bokeh.models.Spacer(height=10),
@@ -300,9 +287,9 @@ def layout(p, mon, ctrls):
 
     monitor_buttons = bokeh.layouts.column(
         bokeh.models.Spacer(height=50),
-        ctrls["stream_monitor"],
+        ctrls["monitor_stream"],
         bokeh.models.Spacer(height=50),
-        ctrls["clear_monitor"],
+        ctrls["monitor_clear"],
     )
     monitor_layout = bokeh.layouts.row(
         mon,
@@ -376,72 +363,6 @@ def find_board(port=None, quiet=True):
     return port
 
 
-def time_in_ms(t, time_units):
-    if t.isdecimal():
-        t = int(t)
-    else:
-        t = float(t)
-
-    if time_units == "ms":
-        return t
-    elif time_units == "s":
-        return t * 1000
-    elif time_units == "µs":
-        return t / 1000 if t % 1000 else t // 1000
-    elif time_units == "min":
-        return t * 60000
-    elif time_units == "hr":
-        return t * 360000
-
-
-def populate_glyphs(data):
-    # Define the data source
-    data_dict = {"data" + str(i): [] for i in range(n_data)}
-    data_dict["t"] = []
-    source = bokeh.models.ColumnDataSource(data=data_dict)
-
-    # Populate glyphs
-    for i in range(n_data):
-        p.line(source=source, x="t", y="data" + str(i))
-
-
-def stream_callback(ser, plot_data, new):
-    if new:
-        plot_data["mode"] = "stream"
-    else:
-        plot_data["mode"] = "ignore"
-
-    ser.reset_input_buffer()
-
-
-def reset_callback(mode, data, source, phantom_source, controls):
-    # Turn off the stream
-    if mode == "stream":
-        controls["acquire"].active = False
-
-    # Black out the data dictionaries
-    data["t"] = []
-    data["V"] = []
-
-    # Reset the sources
-    source.data = dict(t=[], V=[])
-    phantom_source.data = dict(t=[0], V=[0])
-
-
-def plot_update(plot_data, source, phantom_source, rollover):
-    # Update plot by streaming in data
-    new_data = {
-        "t": np.array(data["t"][data["prev_array_length"] :]) / 1000,
-        "V": data["V"][data["prev_array_length"] :],
-    }
-    source.stream(new_data, rollover)
-
-    # Adjust new phantom data point if new data arrived
-    if len(new_data["t"] > 0):
-        phantom_source.data = dict(t=[new_data["t"][-1]], V=[new_data["V"][-1]])
-    data["prev_array_length"] = len(data["t"])
-
-
 def app():
     def _app(doc):
         # "Global" variables
@@ -456,13 +377,26 @@ def app():
             daq_task=None,
             port_search_task=None,
         )
-        plot_data = dict(prev_array_length=0, t=[], data=[], streaming=False)
-        monitor_data = dict(prev_array_length=0, data=[], streaming=False)
 
-        p, source, phantom_source = plot()
+        p, phantom_source = plot()
         mon = monitor()
         ctrls = controls(serial_dict)
         app_layout = layout(p, mon, ctrls)
+
+        plot_data = dict(
+            prev_array_length=0,
+            data=np.array([]),
+            time_column=None,
+            time_units="ms",
+            max_cols=10,
+            streaming=False,
+            sources=[],
+            phantom_source=phantom_source,
+            delimiter=",",
+            lines=None,
+            dots=None,
+        )
+        monitor_data = dict(prev_array_length=0, data=[], streaming=False)
 
         # Store the base text for clearing
         monitor_data["base_text"] = mon.text
@@ -501,26 +435,41 @@ def app():
             callbacks.baudrate_callback(ctrls["baudrate"], serial_dict)
 
         def _input_window_callback(attr, old, new):
-            callbacks.input_window_callback(
-                ctrls["input_window"], ctrls["ascii_bytes"], serial_dict["ser"]
-            )
+            if new != "":
+                callbacks.input_window_callback(
+                    ctrls["input_window"], ctrls["ascii_bytes"], serial_dict["ser"]
+                )
 
         def _monitor_stream_callback(event=None):
-            callbacks.monitor_stream_callback(ctrls["stream_monitor"], monitor_data)
+            callbacks.monitor_stream_callback(ctrls["monitor_stream"], monitor_data)
 
         def _monitor_clear_callback(event=None):
-            callbacks.monitor_clear_callback(ctrls["clear_monitor"], mon, monitor_data)
+            callbacks.monitor_clear_callback(mon, monitor_data)
+
+        def _plot_stream_callback(event=None):
+            callbacks.plot_stream_callback(ctrls["plot_stream"], plot_data)
+
+        def _plot_clear_callback(event=None):
+            callbacks.plot_clear_callback(p, plot_data)
+
+        def _time_units_callback(attr, old, new):
+            callbacks.time_units_callback(ctrls["time_units"], p, plot_data)
+
+        def _time_column_callback(attr, old, new):
+            callbacks.time_column_callback(
+                ctrls["time_column"], ctrls["time_units"], p, plot_data
+            )
+
+        def _max_cols_callback(attr, old, new):
+            callbacks.max_cols_callback(ctrls["max_cols"], plot_data)
+
+        def _delimiter_select_callback(attr, old, new):
+            callbacks.delimiter_select_callback(ctrls["delimiter"], plot_data)
 
         @bokeh.driving.linear()
         def _stream_update(step):
             callbacks.stream_update(
-                plot,
-                mon,
-                plot_data,
-                monitor_data,
-                source,
-                phantom_source,
-                int(ctrls["rollover"].value),
+                p, mon, plot_data, monitor_data, int(ctrls["rollover"].value),
             )
 
         @bokeh.driving.linear()
@@ -533,8 +482,14 @@ def app():
         ctrls["port_disconnect"].on_click(_port_disconnect_callback)
         ctrls["baudrate"].on_change("value", _baudrate_callback)
         ctrls["input_window"].on_change("value", _input_window_callback)
-        ctrls["stream_monitor"].on_click(_monitor_stream_callback)
-        ctrls["clear_monitor"].on_click(_monitor_clear_callback)
+        ctrls["monitor_stream"].on_click(_monitor_stream_callback)
+        ctrls["monitor_clear"].on_click(_monitor_clear_callback)
+        ctrls["plot_clear"].on_click(_plot_clear_callback)
+        ctrls["plot_stream"].on_click(_plot_stream_callback)
+        ctrls["delimiter"].on_change("value", _delimiter_select_callback)
+        ctrls["time_column"].on_change("value", _time_column_callback)
+        ctrls["max_cols"].on_change("value", _max_cols_callback)
+        ctrls["time_units"].on_change("value", _time_units_callback)
 
         # Add the layout to the app
         doc.add_root(app_layout)

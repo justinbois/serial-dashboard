@@ -2,10 +2,30 @@ import asyncio
 import serial
 import time
 
+import numpy as np
+
 from . import callbacks
 
 
-def parse_read(read, sep=" ", time_column=None, time_units="ms", n_reads=0):
+def time_in_ms(t, time_units):
+    if t.isdecimal():
+        t = int(t)
+    else:
+        t = float(t)
+
+    if time_units == "ms":
+        return t
+    elif time_units == "s":
+        return t * 1000
+    elif time_units == "µs":
+        return t / 1000 if t % 1000 else t // 1000
+    elif time_units == "min":
+        return t * 60000
+    elif time_units == "hr":
+        return t * 360000
+
+
+def parse_read(read, sep=",", n_reads=0):
     """Parse a read with time, voltage data
 
     Parameters
@@ -13,16 +33,8 @@ def parse_read(read, sep=" ", time_column=None, time_units="ms", n_reads=0):
     read : byte string
         Byte string with comma delimited time/voltage
         measurements.
-    sep : str, default ' '
+    sep : str, default ','
         Character separating columns of written data.
-    time_column : int, default None
-        If int, the index of the column of read-in data that contains
-        the time in milliseconds. If None, then no time is read in, and
-        the read number is stored in the `time_ms` output.
-    time_units : str, default "ms"
-        One of [None, 'µs', 'ms', 's', 'min', 'hr']. All times are
-        converted to milliseconds, except for None, which is only
-        allowed when time_column is None.
     n_reads : int, default 0
         The number of reads that have previously been read in.
 
@@ -38,34 +50,37 @@ def parse_read(read, sep=" ", time_column=None, time_units="ms", n_reads=0):
     remaining_bytes : byte string
         Remaining, unparsed bytes.
     """
-    time_ms = []
     data = []
 
-    # Separate independent time/voltage measurements
-    pattern = re.compile(bytes("\d+|" + sep, "ascii"))
-    raw_list = [b"".join(pattern.findall(raw)).decode() for raw in read.split(b"\r\n")]
+    # Read in lines of raw data
+    raw_list = read.decode().split("\n")
 
     for raw in raw_list[:-1]:
         try:
-            read_data = raw.split(sep)
-            data.append(
-                [
-                    int(datum) if datum.isdecimal() else float(datum)
-                    for datum in read_data
-                ]
-            )
-            if time_column is None:
-                time_ms.append(n_reads)
+            if sep == "whitespace":
+                read_data = raw.split()
             else:
-                time_ms.append(time_in_ms(read_data.pop(time_column), time_units))
+                read_data = raw.split(sep)
+
+            new_data = []
+            for datum in read_data:
+                datum = datum.strip()
+                if datum.isdecimal():
+                    new_data.append(int(datum))
+                else:
+                    try:
+                        new_data.append(float(datum))
+                    except:
+                        new_data.append(np.nan)
+            data.append(new_data)
             n_reads += 1
         except:
             pass
 
-    if len(raw_list) == 0:
-        return time_ms, data, n_reads, b""
+    if len(raw_list[-1]) == 0:
+        return data, n_reads, b""
     else:
-        return time_ms, data, n_reads, raw_list[-1].encode()
+        return data, n_reads, raw_list[-1].encode()
 
 
 def read_all(ser, read_buffer=b"", **args):
@@ -131,6 +146,76 @@ def read_all_newlines(ser, read_buffer=b"", n_reads=1):
     return raw
 
 
+def fill_nans(x, ncols):
+    """Right-fill NaNs into an array so that each row has the same
+    number of entries.
+
+    Parameters
+    ----------
+    x : list of lists
+        Array with potentially unequal row lengths to be filled.
+    ncols : int
+        Number of columns we wish to achieve after filling NaNs. We fill
+        to the larger of the maximum row length of `x` and `ncols`.
+
+    Returns
+    -------
+    output : Numpy array
+        Return a 2D Numpy array with all rows having the same number
+        of columns, padded with NaNs. The exception is if the input is
+        an empty list and `ncols` is zero, in which case np.array([]) is
+        returned.
+
+    Notes
+    -----
+    .. `x` is modified in place. Do not use this function if you want
+       `x` back.
+    .. There is no type-checking on `x`. It must be a list of lists.
+    """
+    if len(x) == 0:
+        if ncols > 0:
+            out = np.empty((1, ncols))
+            out.fill(np.nan)
+            return out, ncols
+        else:
+            return np.array([]), 0
+
+    # Find number of columns in this incoming data
+    ncols = max(ncols, max([len(row) for row in x]))
+
+    # Fill in incoming data with NaNs so each row has same length
+    for i, row in enumerate(x):
+        x[i] += [np.nan] * (ncols - len(row))
+
+    # Convert incoming data to a Numpy array
+    return np.array(x), ncols
+
+
+def backfill_nans(x, ncols):
+    """Given a 2D Numpy array, right-append an array of NaNs such that
+    there are ncols in the resulting array.
+
+    Parameters
+    ----------
+    x : 2D Numpy array
+        Array to be NaN filled
+
+    Returns
+    -------
+    x_out : 2D Numpy array
+        A 2D Numpy array, right-padded with NaNs.
+    """
+    ncols_x = x.shape[1]
+
+    if ncols_x >= ncols:
+        return x
+
+    nan_array = np.empty((len(x), ncols - ncols_x))
+    nan_array.fill(np.nan)
+
+    return np.concatenate((x, nan_array), axis=1)
+
+
 async def daq_stream_async(
     ser, plot_data, monitor_data, delay=20, n_reads_per_chunk=1, reader=read_all,
 ):
@@ -142,13 +227,38 @@ async def daq_stream_async(
         raw = reader(ser, read_buffer=read_buffer[0], n_reads=n_reads_per_chunk)
 
         if plot_data["streaming"]:
-            # Parse it, passing if it is gibberish
+            # Parse it, passing if it is gibberish or otherwise corrupted
             try:
-                t, V, read_buffer[0] = parse_read(raw)
+                data, n_reads, read_buffer[0] = parse_read(
+                    raw, sep=plot_data["delimiter"]
+                )
 
-                # Update data dictionary
-                data["t"] += t
-                data["V"] += V
+                # Proceed if we actually read in data
+                if len(data) > 0:
+                    # Make sure all read in data has the same number of columns
+                    data, ncols = fill_nans(data, plot_data["ncols"])
+
+                    # If this is our first data, add them into plot_data
+                    if len(plot_data["data"]) == 0:
+                        plot_data["data"] = data.copy()
+                        plot_data["ncols"] = ncols
+                    else:
+                        # If the new data added columns, backfill previous data with NaNs
+                        if ncols > plot_data["ncols"]:
+                            plot_data["data"] = backfill_nans(plot_data["data"], ncols)
+                            plot_data["ncols"] = ncols
+
+                            # Alert that the ColumnDataSource needs to be refreshed
+                            plot_data["source_needs_refresh"] = True
+
+                        # If the new data has less columns, fill in new data with NaNs
+                        elif ncols < plot_data["ncols"]:
+                            data = backfill_nans(data, plot_data["ncols"])
+
+                        # Update data
+                        plot_data["data"] = np.concatenate(
+                            (plot_data["data"], data), axis=0
+                        )
             except:
                 pass
 
@@ -172,7 +282,7 @@ async def port_search_async(port_select, serial_dict):
                 + (
                     "  " + port_name.manufacturer
                     if port_name.manufacturer is not None
-                    else " "
+                    else ""
                 )
                 for port_name in ports
             ]
