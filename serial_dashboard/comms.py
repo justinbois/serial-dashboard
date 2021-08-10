@@ -235,30 +235,11 @@ async def daq_stream_async(
 
                 # Proceed if we actually read in data
                 if len(data) > 0:
-                    # Make sure all read in data has the same number of columns
-                    data, ncols = fill_nans(data, plot_data["ncols"])
-
                     # If this is our first data, add them into plot_data
                     if len(plot_data["data"]) == 0:
-                        plot_data["data"] = data.copy()
-                        plot_data["ncols"] = ncols
+                        plot_data["data"] = data
                     else:
-                        # If the new data added columns, backfill previous data with NaNs
-                        if ncols > plot_data["ncols"]:
-                            plot_data["data"] = backfill_nans(plot_data["data"], ncols)
-                            plot_data["ncols"] = ncols
-
-                            # Alert that the ColumnDataSource needs to be refreshed
-                            plot_data["source_needs_refresh"] = True
-
-                        # If the new data has less columns, fill in new data with NaNs
-                        elif ncols < plot_data["ncols"]:
-                            data = backfill_nans(data, plot_data["ncols"])
-
-                        # Update data
-                        plot_data["data"] = np.concatenate(
-                            (plot_data["data"], data), axis=0
-                        )
+                        plot_data["data"] += data
             except:
                 pass
 

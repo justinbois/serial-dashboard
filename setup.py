@@ -2,35 +2,49 @@ from setuptools import setup, find_packages
 from codecs import open
 from os import path
 
-__version__ = '0.0.1'
+__version__ = "0.0.1"
 
 here = path.abspath(path.dirname(__file__))
 
 # get the dependencies and installs
-with open(path.join(here, 'requirements.txt'), encoding='utf-8') as f:
-    all_reqs = f.read().split('\n')
+with open(path.join(here, "requirements.txt"), encoding="utf-8") as f:
+    all_reqs = f.read().split("\n")
 
-install_requires = [x.strip() for x in all_reqs if 'git+' not in x]
-dependency_links = [x.strip().replace('git+', '') for x in all_reqs if x.startswith('git+')]
+install_requires = [x.strip() for x in all_reqs if "git+" not in x]
+
+# Need to also include click
+install_requires.append('Click')
+
+dependency_links = [
+    x.strip().replace("git+", "") for x in all_reqs if x.startswith("git+")
+]
+
+# Entry points for click
+entry_points = {
+    'console_scripts': [
+        'launchscript = serial_dashboard.scripts.lauchscript:cli',
+    ]
+}
 
 setup(
-    name='serial_plotter',
+    name="serial_plotter",
     version=__version__,
-    description='Bokeh-based serial plotter.',
-    long_description='Bokeh-based serial plotter.',
-    url='https://github.com/justinbois/serial-plotter',
-    download_url='https://github.com/justinbois/serial-plotter/tarball/' + __version__,
-    license='BSD',
+    description="Bokeh-based serial plotter.",
+    long_description="Bokeh-based serial plotter.",
+    url="https://github.com/justinbois/serial-plotter",
+    download_url="https://github.com/justinbois/serial-plotter/tarball/" + __version__,
+    license="BSD",
     classifiers=[
-      'Development Status :: 3 - Alpha',
-      'Intended Audience :: Science/Research',
-      'Programming Language :: Python :: 3',
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Science/Research",
+        "Programming Language :: Python :: 3",
     ],
-    keywords='',
-    packages=find_packages(exclude=['docs', 'tests*']),
+    keywords="",
+    packages=find_packages(exclude=["docs", "tests*"]),
     include_package_data=True,
-    author='Justin Bois',
+    author="Justin Bois",
     install_requires=install_requires,
+    entry_points=entry_points,
     dependency_links=dependency_links,
-    author_email='bois@caltech.edu'
+    author_email="bois@caltech.edu",
 )

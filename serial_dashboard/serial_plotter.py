@@ -41,7 +41,20 @@ def plot():
     )
     p.circle(source=phantom_source, x="phantom_t", y="phantom_y", visible=False)
 
-    return p, phantom_source
+    # Make an empty legend
+    legend = bokeh.models.Legend(
+        items=[],
+        location="center",
+        label_text_font_size="8pt",
+        spacing=1,
+        label_height=15,
+        glyph_height=15,
+        click_policy="hide",
+    )
+
+    p.add_layout(legend, "right")
+
+    return p, legend, phantom_source
 
 
 def monitor():
@@ -159,18 +172,21 @@ def controls(serial_dict):
             "asterisk",
             "slash",
         ],
+        width=100,
     )
     rollover = bokeh.models.Select(
-        title="number of points on plot",
+        title="plot rollover",
         value="400",
-        options=["100", "200", "400", "800", "1000", "unlimited"],
+        options=["100", "200", "400", "800", "1600", "3200"],
+        width=100,
     )
     max_cols = bokeh.models.Spinner(
-        title="max columns in input", value=10, low=1, high=10, step=1
+        title="max columns in input", value=10, low=1, high=10, step=1, width=100,
     )
+    col_labels = bokeh.models.TextInput(title="column labels", value="", width=200)
 
     # Set up port selector
-    port = bokeh.models.Select(title="port", options=[], value="")
+    port = bokeh.models.Select(title="port", options=[], value="", width=200,)
 
     # Set up baud rate with Arduino defaults
     baudrate = bokeh.models.Select(
@@ -193,6 +209,7 @@ def controls(serial_dict):
             "2000000",
         ],
         value="115200",
+        width=100,
     )
     callbacks.baudrate_callback(baudrate, serial_dict)
 
@@ -212,11 +229,15 @@ def controls(serial_dict):
         title="time column",
         value="None",
         options=["None", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+        width=100,
     )
     time_units = bokeh.models.Select(
-        title="time units", value="ms", options=["None", "µs", "ms", "s", "min", "hr"]
+        title="time units",
+        value="ms",
+        options=["None", "µs", "ms", "s", "min", "hr"],
+        width=100,
     )
-    input_window = bokeh.models.TextInput(title="input", value="", width=180)
+    input_window = bokeh.models.TextInput(title="input", value="", width=150)
     ascii_bytes = bokeh.models.RadioGroup(labels=["ascii", "bytes"], active=0)
 
     return dict(
@@ -236,6 +257,7 @@ def controls(serial_dict):
         port_status=port_status,
         time_column=time_column,
         max_cols=max_cols,
+        col_labels=col_labels,
         time_units=time_units,
         input_window=input_window,
         ascii_bytes=ascii_bytes,
@@ -250,39 +272,46 @@ def layout(p, mon, ctrls):
         ctrls["plot_clear"],
     )
     plotter_layout = bokeh.layouts.row(
-        p,
-        bokeh.models.Spacer(width=10),
         plotter_buttons,
         bokeh.models.Spacer(width=15),
-        spacing=10,
-        margin=(30, 30, 30, 30),
+        p,
+        bokeh.models.Spacer(width=10),
+        margin=(30, 0, 30, 0),
         background="whitesmoke",
     )
 
     input_layout = bokeh.layouts.row(
+        bokeh.models.Spacer(width=10),
         ctrls["input_window"],
         bokeh.models.Spacer(width=20),
         bokeh.layouts.column(bokeh.models.Spacer(height=15), ctrls["ascii_bytes"]),
+        background="whitesmoke",
+        width=300,
+    )
+
+    port_controls = bokeh.layouts.column(
+        ctrls["port"],
+        ctrls["baudrate"],
+        bokeh.models.Spacer(height=10),
+        ctrls["port_connect"],
+        ctrls["port_disconnect"],
+        ctrls["port_status"],
+        background="whitesmoke",
     )
 
     specs = bokeh.layouts.column(
-        ctrls["port"],
-        ctrls["baudrate"],
-        bokeh.layouts.row(ctrls["port_connect"], ctrls["port_disconnect"]),
-        ctrls["port_status"],
-        bokeh.models.Spacer(height=40),
         ctrls["delimiter"],
         bokeh.models.Spacer(height=10),
         ctrls["max_cols"],
+        bokeh.models.Spacer(height=10),
+        ctrls["col_labels"],
         bokeh.models.Spacer(height=10),
         ctrls["time_column"],
         bokeh.models.Spacer(height=10),
         ctrls["time_units"],
         bokeh.models.Spacer(height=10),
         ctrls["rollover"],
-        bokeh.models.Spacer(height=40),
-        input_layout,
-        width=200,
+        background="whitesmoke",
     )
 
     monitor_buttons = bokeh.layouts.column(
@@ -292,18 +321,20 @@ def layout(p, mon, ctrls):
         ctrls["monitor_clear"],
     )
     monitor_layout = bokeh.layouts.row(
-        mon,
-        bokeh.models.Spacer(width=10),
         monitor_buttons,
         bokeh.models.Spacer(width=15),
-        spacing=10,
-        margin=(30, 30, 30, 30),
+        mon,
+        bokeh.models.Spacer(width=10),
+        margin=(30, 0, 30, 0),
         background="whitesmoke",
     )
 
     return bokeh.layouts.row(
-        bokeh.layouts.column(plotter_layout, monitor_layout),
-        bokeh.layouts.column(bokeh.models.Spacer(height=10), specs),
+        bokeh.layouts.column(port_controls, bokeh.models.Spacer(height=30), specs),
+        bokeh.models.Spacer(width=20),
+        bokeh.layouts.column(
+            bokeh.models.Spacer(height=20), input_layout, plotter_layout, monitor_layout
+        ),
     )
 
 
@@ -378,25 +409,27 @@ def app():
             port_search_task=None,
         )
 
-        p, phantom_source = plot()
+        p, legend, phantom_source = plot()
         mon = monitor()
         ctrls = controls(serial_dict)
         app_layout = layout(p, mon, ctrls)
 
         plot_data = dict(
-            prev_array_length=0,
+            prev_data_length=0,
             data=np.array([]),
             time_column=None,
             time_units="ms",
             max_cols=10,
+            col_labels=[str(col) for col in range(10)],
             streaming=False,
             sources=[],
             phantom_source=phantom_source,
+            legend=legend,
             delimiter=",",
             lines=None,
             dots=None,
         )
-        monitor_data = dict(prev_array_length=0, data=[], streaming=False)
+        monitor_data = dict(prev_data_length=0, data=[], streaming=False)
 
         # Store the base text for clearing
         monitor_data["base_text"] = mon.text
@@ -415,10 +448,12 @@ def app():
                 ctrls["port_disconnect"],
                 ctrls["port"],
                 ctrls["baudrate"],
+                ctrls["max_cols"],
                 ctrls["port_status"],
                 serial_dict,
                 plot_data,
                 monitor_data,
+                p,
             )
 
         def _port_disconnect_callback(event=None):
@@ -427,6 +462,7 @@ def app():
                 ctrls["port_disconnect"],
                 ctrls["port"],
                 ctrls["baudrate"],
+                ctrls["max_cols"],
                 ctrls["port_status"],
                 serial_dict,
             )
@@ -453,7 +489,9 @@ def app():
             callbacks.plot_clear_callback(p, plot_data)
 
         def _time_units_callback(attr, old, new):
-            callbacks.time_units_callback(ctrls["time_units"], p, plot_data)
+            callbacks.time_units_callback(
+                ctrls["time_units"], ctrls["time_column"], p, plot_data
+            )
 
         def _time_column_callback(attr, old, new):
             callbacks.time_column_callback(
@@ -462,6 +500,9 @@ def app():
 
         def _max_cols_callback(attr, old, new):
             callbacks.max_cols_callback(ctrls["max_cols"], plot_data)
+
+        def _col_labels_callback(attr, old, new):
+            callbacks.col_labels_callback(ctrls["col_labels"], plot_data)
 
         def _delimiter_select_callback(attr, old, new):
             callbacks.delimiter_select_callback(ctrls["delimiter"], plot_data)
@@ -489,6 +530,7 @@ def app():
         ctrls["delimiter"].on_change("value", _delimiter_select_callback)
         ctrls["time_column"].on_change("value", _time_column_callback)
         ctrls["max_cols"].on_change("value", _max_cols_callback)
+        ctrls["col_labels"].on_change("value", _col_labels_callback)
         ctrls["time_units"].on_change("value", _time_units_callback)
 
         # Add the layout to the app
