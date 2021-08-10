@@ -443,3 +443,51 @@ def input_window_callback(input_window, ascii_bytes, ser):
 
         if message_ok:
             ser.write(message)
+
+
+def shutdown_callback(shutdown_button, confirm_shutdown_button, cancel_shutdown_button):
+    shutdown_button.disabled = True
+    shutdown_button.visible = False
+    confirm_shutdown_button.visible = True
+    cancel_shutdown_button.visible = True
+    confirm_shutdown_button.disabled = False
+    cancel_shutdown_button.disabled = False
+
+
+def cancel_shutdown_callback(
+    shutdown_button, confirm_shutdown_button, cancel_shutdown_button
+):
+    shutdown_button.disabled = False
+    shutdown_button.visible = True
+    confirm_shutdown_button.visible = False
+    cancel_shutdown_button.visible = False
+    confirm_shutdown_button.disabled = True
+    cancel_shutdown_button.disabled = True
+
+
+def confirm_shutdown_callback(ctrls, serial_dict):
+    for widget in ctrls:
+        ctrls[widget].disabled = True
+
+    try:
+        serial_dict["daq_task"].cancel()
+    except:
+        pass
+
+    try:
+        serial_dict["port_search_task"].cancel()
+    except:
+        pass
+
+    # Close the connection if open
+    if serial_dict["ser"] is not None:
+        try:
+            serial_dict["ser"].close()
+            serial_dict["ser"] = None
+        except:
+            pass
+
+    serial_dict["port_status"] = "disconnected"
+    port_status_callback(ctrls["port_status"], serial_dict)
+
+    serial_dict['kill_app'] = True

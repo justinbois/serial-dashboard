@@ -1,5 +1,5 @@
 import asyncio
-import re
+import sys
 
 import numpy as np
 import pandas as pd
@@ -239,6 +239,23 @@ def controls(serial_dict):
     )
     input_window = bokeh.models.TextInput(title="input", value="", width=150)
     ascii_bytes = bokeh.models.RadioGroup(labels=["ascii", "bytes"], active=0)
+    shutdown = bokeh.models.Button(
+        label="shut down dashboard", button_type="danger", width=310
+    )
+    confirm_shutdown = bokeh.models.Button(
+        label="confirm shutdown",
+        button_type="danger",
+        width=150,
+        visible=False,
+        disabled=True,
+    )
+    cancel_shutdown = bokeh.models.Button(
+        label="cancel shutdown",
+        button_type="primary",
+        width=150,
+        visible=False,
+        disabled=True,
+    )
 
     return dict(
         plot_stream=plot_stream,
@@ -261,6 +278,9 @@ def controls(serial_dict):
         time_units=time_units,
         input_window=input_window,
         ascii_bytes=ascii_bytes,
+        shutdown=shutdown,
+        confirm_shutdown=confirm_shutdown,
+        cancel_shutdown=cancel_shutdown,
     )
 
 
@@ -286,7 +306,13 @@ def layout(p, mon, ctrls):
         bokeh.models.Spacer(width=20),
         bokeh.layouts.column(bokeh.models.Spacer(height=15), ctrls["ascii_bytes"]),
         background="whitesmoke",
-        width=300,
+        width=275,
+    )
+
+    shutdown_layout = bokeh.layouts.row(
+        bokeh.layouts.column(bokeh.models.Spacer(height=10), ctrls["shutdown"]),
+        bokeh.layouts.column(bokeh.models.Spacer(height=10), ctrls["cancel_shutdown"]),
+        bokeh.layouts.column(bokeh.models.Spacer(height=10), ctrls["confirm_shutdown"]),
     )
 
     port_controls = bokeh.layouts.column(
@@ -333,7 +359,12 @@ def layout(p, mon, ctrls):
         bokeh.layouts.column(port_controls, bokeh.models.Spacer(height=30), specs),
         bokeh.models.Spacer(width=20),
         bokeh.layouts.column(
-            bokeh.models.Spacer(height=20), input_layout, plotter_layout, monitor_layout
+            bokeh.models.Spacer(height=20),
+            bokeh.layouts.row(
+                input_layout, bokeh.models.Spacer(width=100), shutdown_layout,
+            ),
+            plotter_layout,
+            monitor_layout,
         ),
     )
 
@@ -407,6 +438,7 @@ def app():
             port_status="disconnected",
             daq_task=None,
             port_search_task=None,
+            kill_app=False,
         )
 
         p, legend, phantom_source = plot()
@@ -507,14 +539,31 @@ def app():
         def _delimiter_select_callback(attr, old, new):
             callbacks.delimiter_select_callback(ctrls["delimiter"], plot_data)
 
+        def _shutdown_callback(event=None):
+            callbacks.shutdown_callback(
+                ctrls["shutdown"], ctrls["confirm_shutdown"], ctrls["cancel_shutdown"]
+            )
+
+        def _cancel_shutdown_callback(event=None):
+            callbacks.cancel_shutdown_callback(
+                ctrls["shutdown"], ctrls["confirm_shutdown"], ctrls["cancel_shutdown"]
+            )
+
+        def _confirm_shutdown_callback(event=None):
+            callbacks.confirm_shutdown_callback(ctrls, serial_dict)
+
         @bokeh.driving.linear()
         def _stream_update(step):
             callbacks.stream_update(
                 p, mon, plot_data, monitor_data, int(ctrls["rollover"].value),
             )
 
+        # Have the app killer in here as well
         @bokeh.driving.linear()
         def _port_search_update(step):
+            if serial_dict['kill_app']:
+                sys.exit()
+
             callbacks.port_search_callback(ctrls["port"], serial_dict)
 
         # Link callbacks
@@ -532,6 +581,9 @@ def app():
         ctrls["max_cols"].on_change("value", _max_cols_callback)
         ctrls["col_labels"].on_change("value", _col_labels_callback)
         ctrls["time_units"].on_change("value", _time_units_callback)
+        ctrls['shutdown'].on_click(_shutdown_callback)
+        ctrls['cancel_shutdown'].on_click(_cancel_shutdown_callback)
+        ctrls['confirm_shutdown'].on_click(_confirm_shutdown_callback)
 
         # Add the layout to the app
         doc.add_root(app_layout)

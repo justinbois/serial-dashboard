@@ -2,7 +2,7 @@
 
 """Top-level package for serial-plotter."""
 
-from .serial_plotter import *
+from .dashboard import *
 
 
 __author__ = """Justin Bois"""
