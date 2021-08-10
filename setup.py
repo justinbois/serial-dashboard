@@ -22,17 +22,17 @@ dependency_links = [
 # Entry points for click
 entry_points = {
     'console_scripts': [
-        'launchscript = serial_dashboard.scripts.lauchscript:cli',
+        'serialdashboard = serial_dashboard.scripts.serialdashboard:cli',
     ]
 }
 
 setup(
-    name="serial_plotter",
+    name="serial_dashboard",
     version=__version__,
-    description="Bokeh-based serial plotter.",
-    long_description="Bokeh-based serial plotter.",
-    url="https://github.com/justinbois/serial-plotter",
-    download_url="https://github.com/justinbois/serial-plotter/tarball/" + __version__,
+    description="Bokeh-based serial dashboard.",
+    long_description="Bokeh-based serial dashboard.",
+    url="https://github.com/justinbois/serial-dashboard",
+    download_url="https://github.com/justinbois/serial-dashboard/tarball/" + __version__,
     license="BSD",
     classifiers=[
         "Development Status :: 3 - Alpha",
