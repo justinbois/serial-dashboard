@@ -217,6 +217,7 @@ def port_connect_callback(
     baudrate_select,
     max_cols_select,
     port_status,
+    input_send,
     serial_dict,
     plot_data,
     monitor_data,
@@ -273,6 +274,9 @@ def port_connect_callback(
         # Enable disconnecting
         port_disconnect.disabled = False
 
+        # Enable sending data
+        input_send.disabled = False
+
         #  Update status
         serial_dict["port_status"] = "connected"
         port_status_callback(port_status, serial_dict)
@@ -293,6 +297,7 @@ def port_disconnect_callback(
     baudrate_select,
     max_cols_select,
     port_status,
+    input_send,
     serial_dict,
 ):
     """Disconnect serial device."""
@@ -311,6 +316,7 @@ def port_disconnect_callback(
 
     # Disable disconnecting
     port_disconnect.disabled = True
+    input_send.disabled = True
 
     # Start port sniffer
     serial_dict["port_search_task"] = asyncio.create_task(
@@ -423,9 +429,9 @@ def delimiter_select_callback(delimiter_select, plot_data):
         plot_data["delimiter"] = "/"
 
 
-def input_window_callback(input_window, ascii_bytes, ser):
+def input_send_callback(input_window, ascii_bytes, ser):
     """Send input to serial device."""
-    if ser is not None and ser.is_open:
+    if ser is not None and ser.is_open and input_window.value != "":
         message_ok = True
         if ascii_bytes.active == 1:
             try:
@@ -443,6 +449,18 @@ def input_window_callback(input_window, ascii_bytes, ser):
 
         if message_ok:
             ser.write(message)
+
+
+def plot_save_callback(plot_save_button, plot_save_window):
+    plot_save_button.visible = False
+    plot_save_window.visible = True
+
+
+def plot_write_callback(
+    plot_file_input, plot_write, plot_save_window, plot_save_button, plot_data
+):
+    plot_save_button.visible = True
+    plot_save_window.visible = False
 
 
 def shutdown_callback(shutdown_button, confirm_shutdown_button, cancel_shutdown_button):
@@ -490,4 +508,4 @@ def confirm_shutdown_callback(ctrls, serial_dict):
     serial_dict["port_status"] = "disconnected"
     port_status_callback(ctrls["port_status"], serial_dict)
 
-    serial_dict['kill_app'] = True
+    serial_dict["kill_app"] = True

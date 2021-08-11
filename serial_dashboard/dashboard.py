@@ -156,9 +156,17 @@ def controls(serial_dict):
         label="stream", button_type="success", width=100
     )
     monitor_clear = bokeh.models.Button(label="clear", button_type="warning", width=100)
-    save = bokeh.models.Button(label="save", button_type="primary", width=100)
-    save_notice = bokeh.models.Div(text="<p>No data saved.</p>", width=165)
-    file_input = bokeh.models.TextInput(title="file name", value="_tmp.csv", width=165)
+    plot_save = bokeh.models.Button(label="save", button_type="primary", width=100)
+    plot_save_notice = bokeh.models.Div(text="<p>No data saved.</p>", width=150)
+    plot_write = bokeh.models.Button(label="save", button_type="primary", width=50)
+    monitor_save = bokeh.models.Button(label="save", button_type="primary", width=100)
+    monitor_save_notice = bokeh.models.Div(text="<p>No data saved.</p>", width=150)
+    plot_file_input = bokeh.models.TextInput(
+        title="file name", value="_tmp.csv", width=150
+    )
+    monitor_file_input = bokeh.models.TextInput(
+        title="file name", value="_tmp.csv", width=150
+    )
     delimiter = bokeh.models.Select(
         title="delimiter",
         value="comma",
@@ -237,7 +245,10 @@ def controls(serial_dict):
         options=["None", "µs", "ms", "s", "min", "hr"],
         width=100,
     )
-    input_window = bokeh.models.TextInput(title="input", value="", width=150)
+    input_window = bokeh.models.TextAreaInput(title="input", value="", width=150)
+    input_send = bokeh.models.Button(
+        label="send", button_type="primary", width=50, disabled=True
+    )
     ascii_bytes = bokeh.models.RadioGroup(labels=["ascii", "bytes"], active=0)
     shutdown = bokeh.models.Button(
         label="shut down dashboard", button_type="danger", width=310
@@ -257,14 +268,25 @@ def controls(serial_dict):
         disabled=True,
     )
 
+    plot_save_window = bokeh.layouts.column(
+        plot_file_input,
+        plot_write,
+        visible=False,
+    )
+
     return dict(
         plot_stream=plot_stream,
         plot_clear=plot_clear,
         monitor_stream=monitor_stream,
         monitor_clear=monitor_clear,
-        save=save,
-        save_notice=save_notice,
-        file_input=file_input,
+        plot_save=plot_save,
+        plot_save_notice=plot_save_notice,
+        plot_write=plot_write,
+        plot_save_window=plot_save_window,
+        monitor_save=monitor_save,
+        monitor_save_notice=monitor_save_notice,
+        plot_file_input=plot_file_input,
+        monitor_file_input=monitor_file_input,
         delimiter=delimiter,
         rollover=rollover,
         port=port,
@@ -277,6 +299,7 @@ def controls(serial_dict):
         col_labels=col_labels,
         time_units=time_units,
         input_window=input_window,
+        input_send=input_send,
         ascii_bytes=ascii_bytes,
         shutdown=shutdown,
         confirm_shutdown=confirm_shutdown,
@@ -286,10 +309,13 @@ def controls(serial_dict):
 
 def layout(p, mon, ctrls):
     plotter_buttons = bokeh.layouts.column(
-        bokeh.models.Spacer(height=50),
+        bokeh.models.Spacer(height=30),
         ctrls["plot_stream"],
-        bokeh.models.Spacer(height=50),
+        bokeh.models.Spacer(height=30),
         ctrls["plot_clear"],
+        bokeh.models.Spacer(height=30),
+        ctrls["plot_save"],
+        ctrls["plot_save_window"],
     )
     plotter_layout = bokeh.layouts.row(
         plotter_buttons,
@@ -304,9 +330,11 @@ def layout(p, mon, ctrls):
         bokeh.models.Spacer(width=10),
         ctrls["input_window"],
         bokeh.models.Spacer(width=20),
-        bokeh.layouts.column(bokeh.models.Spacer(height=15), ctrls["ascii_bytes"]),
+        bokeh.layouts.column(bokeh.models.Spacer(height=20), ctrls["input_send"]),
+        bokeh.models.Spacer(width=20),
+        bokeh.layouts.column(bokeh.models.Spacer(height=17), ctrls["ascii_bytes"]),
         background="whitesmoke",
-        width=275,
+        width=350,
     )
 
     shutdown_layout = bokeh.layouts.row(
@@ -343,9 +371,13 @@ def layout(p, mon, ctrls):
     monitor_buttons = bokeh.layouts.column(
         bokeh.models.Spacer(height=50),
         ctrls["monitor_stream"],
-        bokeh.models.Spacer(height=50),
+        bokeh.models.Spacer(height=30),
         ctrls["monitor_clear"],
+        bokeh.models.Spacer(height=30),
+        ctrls["monitor_save"],
+        ctrls["monitor_file_input"],
     )
+
     monitor_layout = bokeh.layouts.row(
         monitor_buttons,
         bokeh.models.Spacer(width=15),
@@ -482,6 +514,7 @@ def app():
                 ctrls["baudrate"],
                 ctrls["max_cols"],
                 ctrls["port_status"],
+                ctrls["input_send"],
                 serial_dict,
                 plot_data,
                 monitor_data,
@@ -496,17 +529,17 @@ def app():
                 ctrls["baudrate"],
                 ctrls["max_cols"],
                 ctrls["port_status"],
+                ctrls["input_send"],
                 serial_dict,
             )
 
         def _baudrate_callback(attr, old, new):
             callbacks.baudrate_callback(ctrls["baudrate"], serial_dict)
 
-        def _input_window_callback(attr, old, new):
-            if new != "":
-                callbacks.input_window_callback(
-                    ctrls["input_window"], ctrls["ascii_bytes"], serial_dict["ser"]
-                )
+        def _input_send_callback(event=None):
+            callbacks.input_send_callback(
+                ctrls["input_window"], ctrls["ascii_bytes"], serial_dict["ser"]
+            )
 
         def _monitor_stream_callback(event=None):
             callbacks.monitor_stream_callback(ctrls["monitor_stream"], monitor_data)
@@ -552,6 +585,14 @@ def app():
         def _confirm_shutdown_callback(event=None):
             callbacks.confirm_shutdown_callback(ctrls, serial_dict)
 
+        def _plot_save_callback(event=None):
+            callbacks.plot_save_callback(ctrls["plot_save"], ctrls["plot_save_window"])
+
+        def _plot_write_callback(event=None):
+            callbacks.plot_write_callback(
+                ctrls['plot_file_input'], ctrls['plot_write'], ctrls['plot_save_window'], ctrls['plot_save'], plot_data
+            )
+
         @bokeh.driving.linear()
         def _stream_update(step):
             callbacks.stream_update(
@@ -561,7 +602,7 @@ def app():
         # Have the app killer in here as well
         @bokeh.driving.linear()
         def _port_search_update(step):
-            if serial_dict['kill_app']:
+            if serial_dict["kill_app"]:
                 sys.exit()
 
             callbacks.port_search_callback(ctrls["port"], serial_dict)
@@ -571,19 +612,21 @@ def app():
         ctrls["port_connect"].on_click(_port_connect_callback)
         ctrls["port_disconnect"].on_click(_port_disconnect_callback)
         ctrls["baudrate"].on_change("value", _baudrate_callback)
-        ctrls["input_window"].on_change("value", _input_window_callback)
+        ctrls["input_send"].on_click(_input_send_callback)
         ctrls["monitor_stream"].on_click(_monitor_stream_callback)
         ctrls["monitor_clear"].on_click(_monitor_clear_callback)
         ctrls["plot_clear"].on_click(_plot_clear_callback)
         ctrls["plot_stream"].on_click(_plot_stream_callback)
+        ctrls["plot_save"].on_click(_plot_save_callback)
+        ctrls["plot_write"].on_click(_plot_write_callback)
         ctrls["delimiter"].on_change("value", _delimiter_select_callback)
         ctrls["time_column"].on_change("value", _time_column_callback)
         ctrls["max_cols"].on_change("value", _max_cols_callback)
         ctrls["col_labels"].on_change("value", _col_labels_callback)
         ctrls["time_units"].on_change("value", _time_units_callback)
-        ctrls['shutdown'].on_click(_shutdown_callback)
-        ctrls['cancel_shutdown'].on_click(_cancel_shutdown_callback)
-        ctrls['confirm_shutdown'].on_click(_confirm_shutdown_callback)
+        ctrls["shutdown"].on_click(_shutdown_callback)
+        ctrls["cancel_shutdown"].on_click(_cancel_shutdown_callback)
+        ctrls["confirm_shutdown"].on_click(_confirm_shutdown_callback)
 
         # Add the layout to the app
         doc.add_root(app_layout)
