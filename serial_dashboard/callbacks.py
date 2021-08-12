@@ -1,8 +1,10 @@
 import asyncio
 import copy
+import os
 
 import serial
 import numpy as np
+import pandas as pd
 
 import bokeh.models
 
@@ -23,6 +25,16 @@ _colors = [
     "#16bdcf",
 ]
 
+def _update_legend(plotter):
+    """Updates entries shown in legend"""
+    active_col_labels = [
+        x for i, x in enumerate(plotter.col_labels) if i != plotter.time_column
+    ]
+
+    plotter.legend.items = [
+        bokeh.models.LegendItem(label=col_label, renderers=[line], index=col)
+        for col, (col_label, line) in enumerate(zip(active_col_labels, plotter.lines))
+    ]
 
 def _populate_glyphs(plotter, colors=_colors):
     # Define the data sources
@@ -46,14 +58,7 @@ def _populate_glyphs(plotter, colors=_colors):
         plotter.dots[i].visible = False
 
     # Make a legend
-    active_col_labels = [
-        x for i, x in enumerate(plotter.col_labels) if i != plotter.time_column
-    ]
-
-    plotter.legend.items = [
-        bokeh.models.LegendItem(label=col_label, renderers=[line], index=col)
-        for col, (col_label, line) in enumerate(zip(active_col_labels, plotter.lines))
-    ]
+    _update_legend(plotter)
 
     # Make legend visible
     plotter.plot.legend.visible = True
@@ -62,7 +67,7 @@ def _populate_glyphs(plotter, colors=_colors):
 def _adjust_time_axis_label(plotter, monitor, controls, serial_connection):
     if controls.time_units.value in ("µs", "ms", "s"):
         plotter.plot.xaxis.axis_label = "time (s)"
-    elif controls.time_units == "None":
+    elif controls.time_units == "none":
         if plotter.time_column is None:
             plotter.plot.xaxis.axis_label = "sample number"
         else:
@@ -107,18 +112,18 @@ def stream_update(plotter, monitor, controls, serial_connection):
 
 def port_search_callback(plotter, monitor, controls, serial_connection):
     """Update available ports"""
-    if port_select.options != list(serial_connection.reverse_available_ports.keys()):
-        port_select.options = list(serial_connection.reverse_available_ports.keys())
+    if controls.port.options != list(serial_connection.reverse_available_ports.keys()):
+        controls.port.options = list(serial_connection.reverse_available_ports.keys())
 
         # Set the port to the first option if not already set
-        if port_select.value is None or port_select.value == "":
-            port_select.value = port_select.options[0]
+        if controls.port.value is None or controls.port.value == "":
+            controls.port.value = controls.port.options[0]
 
 
 def port_select_callback(plotter, monitor, controls, serial_connection):
     """Store the selected port"""
     serial_connection.port = serial_connection.reverse_available_ports[
-        port_select.value
+        controls.port.value
     ]
 
 
@@ -130,8 +135,8 @@ def baudrate_callback(plotter, monitor, controls, serial_connection):
 def port_connect_callback(plotter, monitor, controls, serial_connection):
     """Connect to a port"""
     # First shut down port searching
-    serial_connection.port_section_task.cancel()
-    serial_connection.port_section_task = None
+    serial_connection.port_search_task.cancel()
+    serial_connection.port_search_task = None
 
     try:
         # Close the connection if open
@@ -156,9 +161,9 @@ def port_connect_callback(plotter, monitor, controls, serial_connection):
         # Start DAQ
         serial_connection.daq_task = asyncio.create_task(
             comms.daq_stream_async(
-                serial_connection.ser,
                 plotter,
-                monitor_data,
+                monitor,
+                serial_connection,
                 delay=20,
                 n_reads_per_chunk=1,
                 reader=comms.read_all,
@@ -208,14 +213,16 @@ def port_disconnect_callback(plotter, monitor, controls, serial_connection):
     controls.port_connect.disabled = False
     controls.port.disabled = False
     controls.baudrate.disabled = False
-    controls.max_cols.disabled = False
+
+    # We are going to keep max_cols locked in after first connect, so comment this out
+    # controls.max_cols.disabled = False
 
     # Disable disconnecting
     controls.port_disconnect.disabled = True
     controls.input_send.disabled = True
 
     # Start port sniffer
-    serial_connection.port_section_task = asyncio.create_task(
+    serial_connection.port_search_task = asyncio.create_task(
         comms.port_search_async(serial_connection)
     )
 
@@ -244,9 +251,18 @@ def plot_stream_callback(plotter, monitor, controls, serial_connection):
 
 
 def plot_clear_callback(plotter, monitor, controls, serial_connection):
-    plotter.data = np.array([])
+    # Blank the data set
+    plotter.data = []
+
+    # Reset all data sources
     for i in range(len(plotter.sources)):
-        plotter.sources[i].data = {key: [] for key in plotter.sources[i].data}
+        plotter.sources[i].data = dict(t=[], y=[])
+
+    # Clear any remaining shrapnel from stale plots
+    for renderer in plotter.plot.renderers:
+        renderer.data_source.data = dict(t=[], y=[])
+
+    # Reset the phantom data
     plotter.phantom_source.data = dict(phantom_t=[0], phantom_y=[0])
 
 
@@ -262,14 +278,25 @@ def monitor_clear_callback(plotter, monitor, controls, serial_connection):
 def time_column_callback(plotter, monitor, controls, serial_connection):
     _adjust_time_axis_label(plotter, monitor, controls, serial_connection)
 
-    if controls.time_units.value == "None":
+    if controls.time_column.value == "none":
         plotter.time_column = None
     else:
         plotter.time_column = int(controls.time_column.value)
 
+    # Update legend if possible (i.e., if _populate_glyphs() has already been called)
+    try:
+        _update_legend(plotter)
+    except:
+        pass
+
 
 def max_cols_callback(plotter, monitor, controls, serial_connection):
     plotter.max_cols = int(controls.max_cols.value)
+
+    if len(plotter.col_labels) > plotter.max_cols:
+        plotter.col_labels = plotter.col_labels[: plotter.max_cols]
+    elif len(plotter.col_labels) < plotter.max_cols:
+        plotter.col_labels += [str(col) for col in range(len(plotter.col_labels), plotter.max_cols)]
 
 
 def col_labels_callback(plotter, monitor, controls, serial_connection):
@@ -283,11 +310,17 @@ def col_labels_callback(plotter, monitor, controls, serial_connection):
     elif len(col_labels) < plotter.max_cols:
         col_labels += [str(col) for col in range(len(col_labels), plotter.max_cols)]
 
+    # Update stored labels
     plotter.col_labels = col_labels
+
+    # Update legend if possible (i.e., if _populate_glyphs() has already been called)
+    try:
+        _update_legend(plotter)
+    except:
+        pass
 
 
 def time_units_callback(plotter, monitor, controls, serial_connection):
-
     _adjust_time_axis_label(plotter, monitor, controls, serial_connection)
 
     plotter.time_units = controls.time_units.value
@@ -314,7 +347,11 @@ def delimiter_select_callback(plotter, monitor, controls, serial_connection):
 
 def input_send_callback(plotter, monitor, controls, serial_connection):
     """Send input to serial device."""
-    if serial_connection.ser is not None and serial_connection.ser.is_open and controls.input_window.value != "":
+    if (
+        serial_connection.ser is not None
+        and serial_connection.ser.is_open
+        and controls.input_window.value != ""
+    ):
         message_ok = True
         if controls.ascii_bytes.active == 1:
             try:
@@ -336,14 +373,76 @@ def input_send_callback(plotter, monitor, controls, serial_connection):
 
 def plot_save_callback(plotter, monitor, controls, serial_connection):
     controls.plot_save.visible = False
-    controls.plot_save_window.visible = True
+    controls.plot_file_input.visible = True
+    controls.plot_write.visible = True
 
 
-def plot_write_callback(
-    plotter, monitor, controls, serial_connectionr
-):
+def plot_write_callback(plotter, monitor, controls, serial_connectionr):
     controls.plot_save.visible = True
-    controls.plot_save_window.visible = False
+    controls.plot_file_input.visible = False
+    controls.plot_write.visible = False
+    controls.plot_save_notice.text = f'<p style="font-size: 8pt;">Data last saved to {controls.plot_file_input.value}.</p>'
+
+    fname = controls.plot_file_input.value.rstrip()
+
+    if os.path.isfile(fname):
+        notice_text = f'<p style="font-size: 8pt; color: tomato;">File {fname} exists. Refused to overwrite.</p>'
+    else:
+        try:
+            # Fill out data set with NaNs
+            data, ncols = parsers.fill_nans(copy.copy(plotter.data), 0)
+
+            if len(data) == 0 or ncols == 0:
+                notice_text = f'<p style="font-size: 8pt; color: tomato;">No plotter data available to write.</p>'
+            else:
+                # Appropriately pad data set if too many/few columns
+                if ncols > len(plotter.col_labels):
+                    columns = plotter.col_labels + [
+                        i for i in range(len(plotter.col_labels), ncols)
+                    ]
+                    df = pd.DataFrame(data=data, columns=columns)
+                else:
+                    if ncols < len(plotter.col_labels):
+                        data = parsers.backfill_nans(data, len(plotter.col_labels))
+                    df = pd.DataFrame(data=data, columns=plotter.col_labels)
+
+                df.to_csv(fname, index=False)
+
+                notice_text = (
+                    f'<p style="font-size: 8pt;">Data last saved to {fname}.</p>'
+                )
+        except:
+            notice_text = f'<p style="font-size: 8pt; color: tomato;">Failed to write to file {fname}.</p>'
+
+    controls.plot_save_notice.text = notice_text
+
+
+def monitor_save_callback(plotter, monitor, controls, serial_connection):
+    controls.monitor_save.visible = False
+    controls.monitor_file_input.visible = True
+    controls.monitor_write.visible = True
+
+
+def monitor_write_callback(plotter, monitor, controls, serial_connection):
+    controls.monitor_save.visible = True
+    controls.monitor_file_input.visible = False
+    controls.monitor_write.visible = False
+
+    fname = controls.monitor_file_input.value.rstrip()
+
+    if os.path.isfile(fname):
+        notice_text = f'<p style="font-size: 8pt; color: tomato;">File {fname} exists. Refused to overwrite.</p>'
+    else:
+        try:
+            with open(fname, "w") as f:
+                f.write("".join(monitor.data))
+
+            notice_text = f'<p style="font-size: 8pt;">Data last saved to {fname}.</p>'
+
+        except:
+            notice_text = f'<p style="font-size: 8pt; color: tomato;">Failed to write to file {fname}.</p>'
+
+    controls.monitor_save_notice.text = notice_text
 
 
 def shutdown_callback(plotter, monitor, controls, serial_connection):
@@ -355,9 +454,7 @@ def shutdown_callback(plotter, monitor, controls, serial_connection):
     controls.cancel_shutdown.disabled = False
 
 
-def cancel_shutdown_callback(
-    plotter, monitor, controls, serial_connection
-):
+def cancel_shutdown_callback(plotter, monitor, controls, serial_connection):
     controls.shutdown.disabled = False
     controls.shutdown.visible = True
     controls.confirm_shutdown.visible = False
@@ -367,7 +464,7 @@ def cancel_shutdown_callback(
 
 
 def confirm_shutdown_callback(plotter, monitor, controls, serial_connection):
-    for widget_name, widget in controls.__dict__.iteritems():
+    for widget_name, widget in controls.__dict__.items():
         try:
             widget.disabled = True
         except:
@@ -379,7 +476,7 @@ def confirm_shutdown_callback(plotter, monitor, controls, serial_connection):
         pass
 
     try:
-        serial_connection.port_section_task.cancel()
+        serial_connection.port_search_task.cancel()
     except:
         pass
 

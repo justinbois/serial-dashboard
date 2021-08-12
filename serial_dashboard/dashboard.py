@@ -19,9 +19,11 @@ from . import comms
 
 class SerialConnection(object):
     def __init__(self):
+        """Create an instance storing information about a serial
+        connection."""
         self.ser = None
         self.port = None
-        self.baudrate = None
+        self.baudrate = 115200
         self.ports = []
         self.available_ports = dict()
         self.reverse_available_ports = dict()
@@ -32,7 +34,8 @@ class SerialConnection(object):
 
 
 class Controls(object):
-    def __init__(self, serial_connection):
+    def __init__(self):
+        """Create all of the controls for the serial dashboard."""
         self.plot_stream = bokeh.models.Toggle(
             label="stream", button_type="success", width=100
         )
@@ -53,28 +56,32 @@ class Controls(object):
             label="save", button_type="primary", width=100
         )
 
-        self.plot_save_notice = bokeh.models.Div(
-            text="<p>No data saved.</p>", width=150
+        self.plot_file_input = bokeh.models.TextAreaInput(
+            title="file name", value="_tmp.csv", width=150, visible=False
         )
 
         self.plot_write = bokeh.models.Button(
-            label="save", button_type="primary", width=50
+            label="save", button_type="primary", width=50, visible=False
+        )
+
+        self.plot_save_notice = bokeh.models.Div(
+            text='<p style="font-size: 8pt;">No data saved.</p>', width=100
         )
 
         self.monitor_save = bokeh.models.Button(
             label="save", button_type="primary", width=100
         )
 
+        self.monitor_file_input = bokeh.models.TextAreaInput(
+            title="file name", value="_tmp.txt", width=150, visible=False
+        )
+
+        self.monitor_write = bokeh.models.Button(
+            label="save", button_type="primary", width=50, visible=False
+        )
+
         self.monitor_save_notice = bokeh.models.Div(
-            text="<p>No data saved.</p>", width=150
-        )
-
-        self.plot_file_input = bokeh.models.TextInput(
-            title="file name", value="_tmp.csv", width=150
-        )
-
-        self.monitor_file_input = bokeh.models.TextInput(
-            title="file name", value="_tmp.csv", width=150
+            text='<p style="font-size: 8pt;">No data saved.</p>', width=100
         )
 
         self.delimiter = bokeh.models.Select(
@@ -101,7 +108,12 @@ class Controls(object):
         )
 
         self.max_cols = bokeh.models.Spinner(
-            title="max columns in input", value=10, low=1, high=10, step=1, width=100,
+            title="maximum number of columns",
+            value=10,
+            low=1,
+            high=10,
+            step=1,
+            width=100,
         )
 
         self.col_labels = bokeh.models.TextInput(
@@ -135,8 +147,6 @@ class Controls(object):
             width=100,
         )
 
-        callbacks.baudrate_callback(baudrate, serial_connection)
-
         self.port_connect = bokeh.models.Button(
             label="connect", button_type="success", width=100
         )
@@ -149,19 +159,17 @@ class Controls(object):
             text="<p><b>port status:</b> disconnected</p>", width=200
         )
 
-        serial_connection.port_status = "disconnected"
-
         self.time_column = bokeh.models.Select(
             title="time column",
-            value="None",
-            options=["None", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+            value="none",
+            options=["none", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
             width=100,
         )
 
         self.time_units = bokeh.models.Select(
             title="time units",
             value="ms",
-            options=["None", "µs", "ms", "s", "min", "hr"],
+            options=["none", "µs", "ms", "s", "min", "hr"],
             width=100,
         )
 
@@ -195,13 +203,10 @@ class Controls(object):
             disabled=True,
         )
 
-        self.plot_save_window = bokeh.layouts.column(
-            plot_file_input, plot_write, visible=False,
-        )
-
 
 class SerialPlotter(object):
     def __init__(self):
+        """Create a serial plotter."""
         self.prev_data_length = 0
         self.data = []
         self.time_column = None
@@ -210,15 +215,13 @@ class SerialPlotter(object):
         self.col_labels = [str(col) for col in range(10)]
         self.streaming = False
         self.sources = []
-        self.phantom_source = phantom_source
-        self.legend = legend
         self.delimiter = ","
         self.lines = None
         self.dots = None
         self.rollover = 400
         self.plot, self.legend, self.phantom_source = self.base_plot()
 
-    def base_plot():
+    def base_plot(self):
         """Build a plot of voltage vs time data"""
         # Set up plot area
         p = bokeh.plotting.figure(
@@ -260,6 +263,7 @@ class SerialPlotter(object):
 
 class SerialMonitor(object):
     def __init__(self, scroll_snap=True):
+        """Create a serial monitor."""
         # Use CSS scroll-snap to enable scrolling with default at bottom
         self.base_text = """<style>
 .monitorHeader {
@@ -341,7 +345,7 @@ class SerialMonitor(object):
 <div class="monitorData"><div class="monitorInner"><pre></pre></div></div>"""
 
         self.monitor = bokeh.models.Div(
-            text=self.base_text if scroll_name else self.alternative_base_text,
+            text=self.base_text if scroll_snap else self.alternative_base_text,
             background="whitesmoke",
             height=250,
             width=650,
@@ -352,27 +356,23 @@ class SerialMonitor(object):
         self.streaming = False
 
 
-def synch_controls(controls, serial_connection):
-    callbacks.baudrate_callback(baudrate, serial_connection)
-
-
 def layout(plotter, monitor, controls):
+    """Build layout of serial dashboard."""
     plotter_buttons = bokeh.layouts.column(
-        bokeh.models.Spacer(height=30),
+        bokeh.models.Spacer(height=20),
         controls.plot_stream,
-        bokeh.models.Spacer(height=30),
+        bokeh.models.Spacer(height=20),
         controls.plot_clear,
-        bokeh.models.Spacer(height=30),
+        bokeh.models.Spacer(height=20),
         controls.plot_save,
-        controls.plot_save_window,
+        bokeh.layouts.row(
+            controls.plot_file_input,
+            bokeh.layouts.column(bokeh.models.Spacer(height=20), controls.plot_write),
+        ),
+        controls.plot_save_notice,
     )
     plotter_layout = bokeh.layouts.row(
-        plotter_buttons,
-        bokeh.models.Spacer(width=15),
-        plotter.plot,
-        bokeh.models.Spacer(width=10),
-        margin=(30, 0, 30, 0),
-        background="whitesmoke",
+        plotter_buttons, plotter.plot, margin=(30, 0, 0, 0), background="whitesmoke",
     )
 
     input_layout = bokeh.layouts.row(
@@ -403,9 +403,9 @@ def layout(plotter, monitor, controls):
     )
 
     specs = bokeh.layouts.column(
-        controls.delimiter,
-        bokeh.models.Spacer(height=10),
         controls.max_cols,
+        bokeh.models.Spacer(height=10),
+        controls.delimiter,
         bokeh.models.Spacer(height=10),
         controls.col_labels,
         bokeh.models.Spacer(height=10),
@@ -418,13 +418,19 @@ def layout(plotter, monitor, controls):
     )
 
     monitor_buttons = bokeh.layouts.column(
-        bokeh.models.Spacer(height=50),
+        bokeh.models.Spacer(height=20),
         controls.monitor_stream,
-        bokeh.models.Spacer(height=30),
+        bokeh.models.Spacer(height=20),
         controls.monitor_clear,
-        bokeh.models.Spacer(height=30),
+        bokeh.models.Spacer(height=20),
         controls.monitor_save,
-        controls.monitor_file_input,
+        bokeh.layouts.row(
+            controls.monitor_file_input,
+            bokeh.layouts.column(
+                bokeh.models.Spacer(height=20), controls.monitor_write
+            ),
+        ),
+        controls.monitor_save_notice,
     )
 
     monitor_layout = bokeh.layouts.row(
@@ -451,6 +457,37 @@ def layout(plotter, monitor, controls):
 
 
 def app():
+    """Returns a function that can be used as a Bokeh app.
+
+    The app can be launched using `bokeh serve --show appscript.py`,
+    from the command line where the contents of `appscript.py` are:
+
+    ```
+    import bokeh.plotting
+    import serial_dashboard
+
+    app = serial_dashboard.app()
+
+    app(bokeh.plotting.curdoc())
+    ```
+
+    To launch the app programmatically with Python, do the following:
+
+    ```
+    from bokeh.server.server import Server
+    from bokeh.application import Application
+    from bokeh.application.handlers.function import FunctionHandler
+    import serial_dashboard
+
+    app = serial_dashboard.app()
+
+    app_dict = {'/serial-dashboard': Application(FunctionHandler(app))}
+    server = Server(app_dict, port=5006)
+    server.show('/serial-dashboard')
+    server.run_until_shutdown()
+    ```
+    """
+
     def _app(doc):
         # "Global" variables
         serial_connection = SerialConnection()
@@ -458,90 +495,145 @@ def app():
         plotter = SerialPlotter()
         monitor = SerialMonitor()
 
-        app_layout = layout(p, mon, ctrls)
+        app_layout = layout(plotter, monitor, controls)
 
         # Start port sniffer
         serial_connection.port_search_task = asyncio.create_task(
-            comms.port_search_async(controls.port, serial_connection)
+            comms.port_search_async(serial_connection)
         )
 
-        def _port_select_callback(attr, old, new):
-            callbacks.port_select_callback(
-                plotter, monitor, controls, serial_connection
-            )
-
+        # Define and link on_click callbacks
         def _port_connect_callback(event=None):
             callbacks.port_connect_callback(
                 plotter, monitor, controls, serial_connection
             )
+
+        controls.port_connect.on_click(_port_connect_callback)
 
         def _port_disconnect_callback(event=None):
             callbacks.port_disconnect_callback(
                 plotter, monitor, controls, serial_connection
             )
 
-        def _baudrate_callback(attr, old, new):
-            callbacks.baudrate_callback(plotter, monitor, controls, serial_connection)
+        controls.port_disconnect.on_click(_port_disconnect_callback)
 
         def _input_send_callback(event=None):
             callbacks.input_send_callback(plotter, monitor, controls, serial_connection)
+
+        controls.input_send.on_click(_input_send_callback)
 
         def _monitor_stream_callback(event=None):
             callbacks.monitor_stream_callback(
                 plotter, monitor, controls, serial_connection
             )
 
+        controls.monitor_stream.on_click(_monitor_stream_callback)
+
         def _monitor_clear_callback(event=None):
             callbacks.monitor_clear_callback(
                 plotter, monitor, controls, serial_connection
             )
+
+        controls.monitor_clear.on_click(_monitor_clear_callback)
+
+        def _monitor_save_callback(event=None):
+            callbacks.monitor_save_callback(
+                plotter, monitor, controls, serial_connection
+            )
+
+        controls.monitor_save.on_click(_monitor_save_callback)
+
+        def _monitor_write_callback(event=None):
+            callbacks.monitor_write_callback(
+                plotter, monitor, controls, serial_connection
+            )
+
+        controls.monitor_write.on_click(_monitor_write_callback)
 
         def _plot_stream_callback(event=None):
             callbacks.plot_stream_callback(
                 plotter, monitor, controls, serial_connection
             )
 
+        controls.plot_stream.on_click(_plot_stream_callback)
+
         def _plot_clear_callback(event=None):
             callbacks.plot_clear_callback(plotter, monitor, controls, serial_connection)
 
-        def _time_units_callback(attr, old, new):
-            callbacks.time_units_callback(plotter, monitor, controls, serial_connection)
+        controls.plot_clear.on_click(_plot_clear_callback)
 
-        def _time_column_callback(attr, old, new):
-            callbacks.time_column_callback(
-                plotter, monitor, controls, serial_connection
-            )
+        def _plot_save_callback(event=None):
+            callbacks.plot_save_callback(plotter, monitor, controls, serial_connection)
 
-        def _max_cols_callback(attr, old, new):
-            callbacks.max_cols_callback(plotter, monitor, controls, serial_connection)
+        controls.plot_save.on_click(_plot_save_callback)
 
-        def _col_labels_callback(attr, old, new):
-            callbacks.col_labels_callback(plotter, monitor, controls, serial_connection)
+        def _plot_write_callback(event=None):
+            callbacks.plot_write_callback(plotter, monitor, controls, serial_connection)
 
-        def _delimiter_select_callback(attr, old, new):
-            callbacks.delimiter_select_callback(
-                plotter, monitor, controls, serial_connection
-            )
+        controls.plot_write.on_click(_plot_write_callback)
 
         def _shutdown_callback(event=None):
             callbacks.shutdown_callback(plotter, monitor, controls, serial_connection)
+
+        controls.shutdown.on_click(_shutdown_callback)
 
         def _cancel_shutdown_callback(event=None):
             callbacks.cancel_shutdown_callback(
                 plotter, monitor, controls, serial_connection
             )
 
+        controls.cancel_shutdown.on_click(_cancel_shutdown_callback)
+
         def _confirm_shutdown_callback(event=None):
             callbacks.confirm_shutdown_callback(
                 plotter, monitor, controls, serial_connection
             )
 
-        def _plot_save_callback(event=None):
-            callbacks.plot_save_callback(plotter, monitor, controls, serial_connection)
+        controls.confirm_shutdown.on_click(_confirm_shutdown_callback)
 
-        def _plot_write_callback(event=None):
-            callbacks.plot_write_callback(plotter, monitor, controls, serial_connection)
+        # Define and link on_change callbacks
+        def _port_select_callback(attr, old, new):
+            callbacks.port_select_callback(
+                plotter, monitor, controls, serial_connection
+            )
 
+        controls.port.on_change("value", _port_select_callback)
+
+        def _baudrate_callback(attr, old, new):
+            callbacks.baudrate_callback(plotter, monitor, controls, serial_connection)
+
+        controls.baudrate.on_change("value", _baudrate_callback)
+
+        def _delimiter_select_callback(attr, old, new):
+            callbacks.delimiter_select_callback(
+                plotter, monitor, controls, serial_connection
+            )
+
+        controls.delimiter.on_change("value", _delimiter_select_callback)
+
+        def _time_column_callback(attr, old, new):
+            callbacks.time_column_callback(
+                plotter, monitor, controls, serial_connection
+            )
+
+        controls.time_column.on_change("value", _time_column_callback)
+
+        def _time_units_callback(attr, old, new):
+            callbacks.time_units_callback(plotter, monitor, controls, serial_connection)
+
+        controls.time_units.on_change("value", _time_units_callback)
+
+        def _max_cols_callback(attr, old, new):
+            callbacks.max_cols_callback(plotter, monitor, controls, serial_connection)
+
+        controls.max_cols.on_change("value", _max_cols_callback)
+
+        def _col_labels_callback(attr, old, new):
+            callbacks.col_labels_callback(plotter, monitor, controls, serial_connection)
+
+        controls.col_labels.on_change("value", _col_labels_callback)
+
+        # Define periodic callbacks
         @bokeh.driving.linear()
         def _stream_update(step):
             callbacks.stream_update(plotter, monitor, controls, serial_connection)
@@ -556,31 +648,10 @@ def app():
                 plotter, monitor, controls, serial_connection
             )
 
-        # Link callbacks
-        controls.port.on_change("value", _port_select_callback)
-        controls.port_connect.on_click(_port_connect_callback)
-        controls.port_disconnect.on_click(_port_disconnect_callback)
-        controls.baudrate.on_change("value", _baudrate_callback)
-        controls.input_send.on_click(_input_send_callback)
-        controls.monitor_stream.on_click(_monitor_stream_callback)
-        controls.monitor_clear.on_click(_monitor_clear_callback)
-        controls.plot_clear.on_click(_plot_clear_callback)
-        controls.plot_stream.on_click(_plot_stream_callback)
-        controls.plot_save.on_click(_plot_save_callback)
-        controls.plot_write.on_click(_plot_write_callback)
-        controls.delimiter.on_change("value", _delimiter_select_callback)
-        controls.time_column.on_change("value", _time_column_callback)
-        controls.max_cols.on_change("value", _max_cols_callback)
-        controls.col_labels.on_change("value", _col_labels_callback)
-        controls.time_units.on_change("value", _time_units_callback)
-        controls.shutdown.on_click(_shutdown_callback)
-        controls.cancel_shutdown.on_click(_cancel_shutdown_callback)
-        controls.confirm_shutdown.on_click(_confirm_shutdown_callback)
-
         # Add the layout to the app
         doc.add_root(app_layout)
 
-        # Add a periodic callback, monitor changes in stream data
+        # Add periodic callbacks to doc
         pc = doc.add_periodic_callback(_stream_update, 90)
         pc_port = doc.add_periodic_callback(_port_search_update, 1000)
 
