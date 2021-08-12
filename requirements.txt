@@ -2,4 +2,3 @@ pyserial
 numpy
 pandas
 bokeh
-colorcet
