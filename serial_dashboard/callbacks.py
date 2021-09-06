@@ -25,16 +25,42 @@ _colors = [
     "#16bdcf",
 ]
 
+
 def _update_legend(plotter):
     """Updates entries shown in legend"""
     active_col_labels = [
         x for i, x in enumerate(plotter.col_labels) if i != plotter.time_column
     ]
 
-    plotter.legend.items = [
-        bokeh.models.LegendItem(label=col_label, renderers=[line], index=col)
-        for col, (col_label, line) in enumerate(zip(active_col_labels, plotter.lines))
-    ]
+    if plotter.lines_visible and plotter.dots_visible:
+        plotter.legend.items = [
+            bokeh.models.LegendItem(label=col_label, renderers=[line, dot], index=col)
+            for col, (col_label, line, dot) in enumerate(
+                zip(active_col_labels, plotter.lines, plotter.dots)
+            )
+        ]
+    elif plotter.lines_visible:
+        plotter.legend.items = [
+            bokeh.models.LegendItem(label=col_label, renderers=[line], index=col)
+            for col, (col_label, line) in enumerate(
+                zip(active_col_labels, plotter.lines)
+            )
+        ]
+    elif plotter.dots_visible:
+        plotter.legend.items = [
+            bokeh.models.LegendItem(label=col_label, renderers=[dot], index=col)
+            for col, (col_label, dot) in enumerate(
+                zip(active_col_labels, plotter.dots)
+            )
+        ]
+
+
+def _glyph_visibility(plotter):
+    """Updates visibility of glyphs"""
+    for i, _ in enumerate(plotter.dots):
+        plotter.dots[i].visible = plotter.dots_visible
+        plotter.lines[i].visible = plotter.lines_visible
+
 
 def _populate_glyphs(plotter, colors=_colors):
     # Define the data sources
@@ -48,14 +74,15 @@ def _populate_glyphs(plotter, colors=_colors):
         plotter.plot.line(source=source, x="t", y="y", color=color)
         for color, source in zip(colors[: plotter.max_cols], plotter.sources)
     ]
+
+    # Dots
     plotter.dots = [
         plotter.plot.circle(source=source, x="t", y="y", color=color, size=3)
         for color, source in zip(colors[: plotter.max_cols], plotter.sources)
     ]
 
-    # Start with just lines visible
-    for i, _ in enumerate(plotter.dots):
-        plotter.dots[i].visible = False
+    # Set visibility
+    _glyph_visibility(plotter)
 
     # Make a legend
     _update_legend(plotter)
@@ -65,15 +92,9 @@ def _populate_glyphs(plotter, colors=_colors):
 
 
 def _adjust_time_axis_label(plotter, monitor, controls, serial_connection):
-    if controls.time_units.value in ("µs", "ms", "s"):
-        plotter.plot.xaxis.axis_label = "time (s)"
-    elif controls.time_units == "none":
-        if plotter.time_column is None:
-            plotter.plot.xaxis.axis_label = "sample number"
-        else:
-            plotter.plot.xaxis.axis_label = "time"
-    else:
-        plotter.plot.xaxis.axis_label = f"time ({controls.time_units.value})"
+    plotter.plot.xaxis.axis_label = parsers._xaxis_label(
+        plotter.time_column, plotter.time_units
+    )
 
 
 def stream_update(plotter, monitor, controls, serial_connection):
@@ -100,7 +121,7 @@ def stream_update(plotter, monitor, controls, serial_connection):
             plotter.sources[i].stream(ty_dict, plotter.rollover)
 
         # Adjust new phantom data point if new data arrived
-        if len(plotter.sources[0].data["t"]) > 0:
+        if len(plotter.sources) > 0 and len(plotter.sources[0].data["t"]) > 0:
             plotter.phantom_source.data = dict(
                 t=[plotter.sources[0].data["t"][-1]],
                 y=[plotter.sources[0].data["y"][-1]],
@@ -135,7 +156,10 @@ def baudrate_callback(plotter, monitor, controls, serial_connection):
 def port_connect_callback(plotter, monitor, controls, serial_connection):
     """Connect to a port"""
     # First shut down port searching
-    serial_connection.port_search_task.cancel()
+    try:
+        serial_connection.port_search_task.cancel()
+    except:
+        pass
     serial_connection.port_search_task = None
 
     try:
@@ -276,12 +300,12 @@ def monitor_clear_callback(plotter, monitor, controls, serial_connection):
 
 
 def time_column_callback(plotter, monitor, controls, serial_connection):
-    _adjust_time_axis_label(plotter, monitor, controls, serial_connection)
-
     if controls.time_column.value == "none":
-        plotter.time_column = None
+        plotter.time_column = "none"
     else:
         plotter.time_column = int(controls.time_column.value)
+
+    _adjust_time_axis_label(plotter, monitor, controls, serial_connection)
 
     # Update legend if possible (i.e., if _populate_glyphs() has already been called)
     try:
@@ -296,19 +320,15 @@ def max_cols_callback(plotter, monitor, controls, serial_connection):
     if len(plotter.col_labels) > plotter.max_cols:
         plotter.col_labels = plotter.col_labels[: plotter.max_cols]
     elif len(plotter.col_labels) < plotter.max_cols:
-        plotter.col_labels += [str(col) for col in range(len(plotter.col_labels), plotter.max_cols)]
+        plotter.col_labels += [
+            str(col) for col in range(len(plotter.col_labels), plotter.max_cols)
+        ]
 
 
 def col_labels_callback(plotter, monitor, controls, serial_connection):
-    if plotter.delimiter == "whitespace":
-        col_labels = controls.col_labels.value.split()
-    else:
-        col_labels = controls.col_labels.value.split(plotter.delimiter)
-
-    if len(col_labels) > plotter.max_cols:
-        col_labels = col_labels[: plotter.max_cols]
-    elif len(col_labels) < plotter.max_cols:
-        col_labels += [str(col) for col in range(len(col_labels), plotter.max_cols)]
+    col_labels = parsers._column_labels_str_to_list(
+        controls.col_labels.value, plotter.delimiter, plotter.max_cols
+    )
 
     # Update stored labels
     plotter.col_labels = col_labels
@@ -320,29 +340,34 @@ def col_labels_callback(plotter, monitor, controls, serial_connection):
         pass
 
 
-def time_units_callback(plotter, monitor, controls, serial_connection):
-    _adjust_time_axis_label(plotter, monitor, controls, serial_connection)
+def rollover_callback(plotter, monitor, controls, serial_connection):
+    plotter.rollover = int(controls.rollover.value)
 
+
+def glyph_callback(plotter, monitor, controls, serial_connection):
+    plotter.lines_visible = True if controls.glyph.active in [0, 2] else False
+    plotter.dots_visible = True if controls.glyph.active in [1, 2] else False
+
+    # Update visibility of glyphs if _populate_glyphs() has already been called)
+    try:
+        _glyph_visibility(plotter)
+    except:
+        pass
+
+    # Update legend if possible (i.e., if _populate_glyphs() has already been called)
+    try:
+        _update_legend(plotter)
+    except:
+        pass
+
+
+def time_units_callback(plotter, monitor, controls, serial_connection):
     plotter.time_units = controls.time_units.value
+    _adjust_time_axis_label(plotter, monitor, controls, serial_connection)
 
 
 def delimiter_select_callback(plotter, monitor, controls, serial_connection):
-    if controls.delimiter.value == "comma":
-        plotter.delimiter = ","
-    elif controls.delimiter.value == "space":
-        plotter.delimiter = " "
-    elif controls.delimiter.value == "tab":
-        plotter.delimiter = "\t"
-    elif controls.delimiter.value == "whitespace":
-        plotter.delimiter = "whitespace"
-    elif controls.delimiter.value == "vertical line":
-        plotter.delimiter = "|"
-    elif controls.delimiter.value == "semicolon":
-        plotter.delimiter = ";"
-    elif controls.delimiter.value == "asterisk":
-        plotter.delimiter = "*"
-    elif controls.delimiter.value == "slash":
-        plotter.delimiter = "/"
+    plotter.delimiter = parsers.delimiter_convert(controls.delimiter.value)
 
 
 def input_send_callback(plotter, monitor, controls, serial_connection):

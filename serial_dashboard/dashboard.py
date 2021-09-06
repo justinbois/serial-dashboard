@@ -15,15 +15,56 @@ import bokeh.driving
 from . import boards
 from . import callbacks
 from . import comms
+from . import parsers
+
+# Allowed values of selector parameters
+allowed_baudrates = (
+    300,
+    1200,
+    2400,
+    4800,
+    9600,
+    19200,
+    38400,
+    57600,
+    74880,
+    115200,
+    230400,
+    250000,
+    500000,
+    1000000,
+    2000000,
+)
+
+allowed_time_columns = ("none", 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+
+allowed_delimiters = (
+    "comma",
+    "space",
+    "tab",
+    "whitespace",
+    "vertical line",
+    "semicolon",
+    "asterisk",
+    "slash",
+)
+
+allowed_timeunits = ("none", "µs", "ms", "s", "min", "hr")
+
+allowed_glyphs = ("lines", "dots", "both")
+
+allowed_rollover = (100, 200, 400, 800, 1600, 3200)
+
+max_max_cols = 10
 
 
 class SerialConnection(object):
-    def __init__(self):
+    def __init__(self, baudrate=115200):
         """Create an instance storing information about a serial
         connection."""
         self.ser = None
         self.port = None
-        self.baudrate = 115200
+        self.baudrate = baudrate
         self.ports = []
         self.available_ports = dict()
         self.reverse_available_ports = dict()
@@ -34,7 +75,19 @@ class SerialConnection(object):
 
 
 class Controls(object):
-    def __init__(self):
+    def __init__(
+        self,
+        baudrate=115200,
+        max_cols=max_max_cols,
+        delimiter="comma",
+        columnlabels="",
+        timecolumn="none",
+        timeunits="ms",
+        rollover=400,
+        glyph="lines",
+        inputtype="ascii",
+        fileprefix="_tmp",
+    ):
         """Create all of the controls for the serial dashboard."""
         self.plot_stream = bokeh.models.Toggle(
             label="stream", button_type="success", width=100
@@ -57,7 +110,7 @@ class Controls(object):
         )
 
         self.plot_file_input = bokeh.models.TextAreaInput(
-            title="file name", value="_tmp.csv", width=150, visible=False
+            title="file name", value=f"{fileprefix}.csv", width=150, visible=False
         )
 
         self.plot_write = bokeh.models.Button(
@@ -68,12 +121,16 @@ class Controls(object):
             text='<p style="font-size: 8pt;">No data saved.</p>', width=100
         )
 
+        self.glyph = bokeh.models.RadioGroup(
+            labels=list(allowed_glyphs), active=allowed_glyphs.index(glyph), width=50
+        )
+
         self.monitor_save = bokeh.models.Button(
             label="save", button_type="primary", width=100
         )
 
         self.monitor_file_input = bokeh.models.TextAreaInput(
-            title="file name", value="_tmp.txt", width=150, visible=False
+            title="file name", value=f"{fileprefix}.txt", width=150, visible=False
         )
 
         self.monitor_write = bokeh.models.Button(
@@ -86,38 +143,29 @@ class Controls(object):
 
         self.delimiter = bokeh.models.Select(
             title="delimiter",
-            value="comma",
-            options=[
-                "comma",
-                "space",
-                "tab",
-                "whitespace",
-                "vertical line",
-                "semicolon",
-                "asterisk",
-                "slash",
-            ],
+            value=delimiter,
+            options=list(allowed_delimiters),
             width=100,
         )
 
         self.rollover = bokeh.models.Select(
             title="plot rollover",
-            value="400",
-            options=["100", "200", "400", "800", "1600", "3200"],
+            value=str(rollover),
+            options=[str(ro) for ro in allowed_rollover],
             width=100,
         )
 
         self.max_cols = bokeh.models.Spinner(
             title="maximum number of columns",
-            value=10,
+            value=max_cols,
             low=1,
-            high=10,
+            high=max_max_cols,
             step=1,
             width=100,
         )
 
         self.col_labels = bokeh.models.TextInput(
-            title="column labels", value="", width=200
+            title="column labels", value=columnlabels, width=200
         )
 
         # Set up port selector
@@ -126,24 +174,8 @@ class Controls(object):
         # Set up baud rate with Arduino defaults
         self.baudrate = bokeh.models.Select(
             title="baud rate",
-            options=[
-                "300",
-                "1200",
-                "2400",
-                "4800",
-                "9600",
-                "19200",
-                "38400",
-                "57600",
-                "74880",
-                "115200",
-                "230400",
-                "250000",
-                "500000",
-                "1000000",
-                "2000000",
-            ],
-            value="115200",
+            options=[str(br) for br in allowed_baudrates],
+            value=str(baudrate),
             width=100,
         )
 
@@ -161,15 +193,15 @@ class Controls(object):
 
         self.time_column = bokeh.models.Select(
             title="time column",
-            value="none",
-            options=["none", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+            value=timecolumn,
+            options=[str(tc) for tc in allowed_time_columns],
             width=100,
         )
 
         self.time_units = bokeh.models.Select(
             title="time units",
-            value="ms",
-            options=["none", "µs", "ms", "s", "min", "hr"],
+            value=timeunits,
+            options=list(allowed_timeunits),
             width=100,
         )
 
@@ -181,7 +213,9 @@ class Controls(object):
             label="send", button_type="primary", width=50, disabled=True
         )
 
-        self.ascii_bytes = bokeh.models.RadioGroup(labels=["ascii", "bytes"], active=0)
+        self.ascii_bytes = bokeh.models.RadioGroup(
+            labels=["ascii", "bytes"], active=(0 if inputtype == "ascii" else 1)
+        )
 
         self.shutdown = bokeh.models.Button(
             label="shut down dashboard", button_type="danger", width=310
@@ -205,20 +239,33 @@ class Controls(object):
 
 
 class SerialPlotter(object):
-    def __init__(self):
+    def __init__(
+        self,
+        max_cols=max_max_cols,
+        delimiter="comma",
+        columnlabels="",
+        timecolumn="none",
+        timeunits="ms",
+        rollover=400,
+        glyph="lines",
+    ):
         """Create a serial plotter."""
         self.prev_data_length = 0
         self.data = []
-        self.time_column = None
-        self.time_units = "ms"
-        self.max_cols = 10
-        self.col_labels = [str(col) for col in range(10)]
+        self.time_column = "none" if timecolumn == "none" else int(timecolumn)
+        self.time_units = timeunits
+        self.max_cols = max_cols
         self.streaming = False
         self.sources = []
-        self.delimiter = ","
+        self.delimiter = parsers._delimiter_convert(delimiter)
+        self.col_labels = parsers._column_labels_str_to_list(
+            columnlabels, self.delimiter, self.max_cols
+        )
         self.lines = None
         self.dots = None
-        self.rollover = 400
+        self.lines_visible = glyph in ("lines", "both")
+        self.dots_visible = glyph in ("dots", "both")
+        self.rollover = rollover
         self.plot, self.legend, self.phantom_source = self.base_plot()
 
     def base_plot(self):
@@ -227,7 +274,7 @@ class SerialPlotter(object):
         p = bokeh.plotting.figure(
             frame_width=600,
             frame_height=175,
-            x_axis_label="sample_number",
+            x_axis_label=parsers._xaxis_label(self.time_column, self.time_units),
             y_axis_label=" ",
             toolbar_location="above",
             title="serial plotter",
@@ -372,7 +419,11 @@ def layout(plotter, monitor, controls):
         controls.plot_save_notice,
     )
     plotter_layout = bokeh.layouts.row(
-        plotter_buttons, plotter.plot, margin=(30, 0, 0, 0), background="whitesmoke",
+        plotter_buttons,
+        plotter.plot,
+        bokeh.layouts.column(bokeh.models.Spacer(height=85), controls.glyph),
+        margin=(30, 0, 0, 0),
+        background="whitesmoke",
     )
 
     input_layout = bokeh.layouts.row(
@@ -446,7 +497,6 @@ def layout(plotter, monitor, controls):
         bokeh.layouts.column(port_controls, bokeh.models.Spacer(height=30), specs),
         bokeh.models.Spacer(width=20),
         bokeh.layouts.column(
-            bokeh.models.Spacer(height=20),
             bokeh.layouts.row(
                 input_layout, bokeh.models.Spacer(width=100), shutdown_layout,
             ),
@@ -456,7 +506,18 @@ def layout(plotter, monitor, controls):
     )
 
 
-def app():
+def app(
+    baudrate=115200,
+    maxcols=10,
+    delimiter="comma",
+    columnlabels="",
+    timecolumn="none",
+    timeunits="ms",
+    rollover=400,
+    glyph="lines",
+    inputtype="ascii",
+    fileprefix="_tmp",
+):
     """Returns a function that can be used as a Bokeh app.
 
     The app can be launched using `bokeh serve --show appscript.py`,
@@ -490,9 +551,28 @@ def app():
 
     def _app(doc):
         # "Global" variables
-        serial_connection = SerialConnection()
-        controls = Controls()
-        plotter = SerialPlotter()
+        serial_connection = SerialConnection(baudrate)
+        controls = Controls(
+            baudrate=baudrate,
+            max_cols=maxcols,
+            delimiter=delimiter,
+            columnlabels=columnlabels,
+            timecolumn=timecolumn,
+            timeunits=timeunits,
+            rollover=rollover,
+            glyph=glyph,
+            inputtype=inputtype,
+            fileprefix=fileprefix,
+        )
+        plotter = SerialPlotter(
+            max_cols=maxcols,
+            delimiter=delimiter,
+            columnlabels=columnlabels,
+            timecolumn=timecolumn,
+            timeunits=timeunits,
+            rollover=rollover,
+            glyph=glyph,
+        )
         monitor = SerialMonitor()
 
         app_layout = layout(plotter, monitor, controls)
@@ -633,6 +713,16 @@ def app():
 
         controls.col_labels.on_change("value", _col_labels_callback)
 
+        def _rollover_callback(attr, old, new):
+            callbacks.rollover_callback(plotter, monitor, controls, serial_connection)
+
+        controls.rollover.on_change("value", _rollover_callback)
+
+        def _glyph_callback(attr, old, new):
+            callbacks.glyph_callback(plotter, monitor, controls, serial_connection)
+
+        controls.glyph.on_change("active", _glyph_callback)
+
         # Define periodic callbacks
         @bokeh.driving.linear()
         def _stream_update(step):
@@ -656,59 +746,3 @@ def app():
         pc_port = doc.add_periodic_callback(_port_search_update, 1000)
 
     return _app
-
-
-def find_board(port=None, quiet=True):
-    """Get the name of the port that is connected to the board.
-
-    Parameters
-    ----------
-    port : str, default None
-        If str, address of port to which board is connected. If None,
-        attempts to find a connected board.
-    quiet : bool, default True
-        If True, do not report port/board name to screen. Otherwise,
-        print that information.
-
-    Returns
-    -------
-    output : str
-        Returns the address of port to which the board is connected.
-        `None` is returned if no board is found.
-
-    """
-    if port is None:
-        my_ports = []
-        ports = serial.tools.list_ports.comports()
-        for p in ports:
-            if p.hwid is not None:
-                try:
-                    i = p.hwid.find("VID:PID=") + 8
-                    j = p.hwid.find(" ", i)
-                    vid_pid = p.hwid[i:j]
-                    if vid_pid in vid_pid_boards:
-                        my_ports.append([p.device, vid_pid_boards[vid_pid], vid_pid])
-                except:
-                    pass
-
-        if len(my_ports) > 1:
-            raise RuntimeError(
-                "Found more that one port. Called `find_board()` with a single `port` argument to choose which one you want to use. The found ports were:\n",
-                my_ports,
-            )
-        elif len(my_ports) == 0:
-            raise RuntimeError("Failed to find any known boards.")
-        else:
-            if not quiet:
-                print(
-                    "Found board "
-                    + my_ports[0][1]
-                    + " with VID:PID "
-                    + my_ports[0][2]
-                    + " at port "
-                    + my_ports[0][0]
-                    + "."
-                )
-            port = my_ports[0][0]
-
-    return port

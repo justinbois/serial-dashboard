@@ -6,6 +6,7 @@ import numpy as np
 
 from . import callbacks
 from . import parsers
+from . import boards
 
 
 def read_all(ser, read_buffer=b"", **args):
@@ -79,15 +80,16 @@ async def daq_stream_async(
     read_buffer = [b""]
     while True:
         # Read in chunk of data
-        raw = reader(
-            serial_connection.ser, read_buffer=read_buffer[0], n_reads=n_reads_per_chunk
-        )
+        raw = reader(serial_connection.ser, read_buffer=b"", n_reads=n_reads_per_chunk)
+
+        if monitor.streaming:
+            monitor.data += raw.decode()
 
         if plotter.streaming:
             # Parse it, passing if it is gibberish or otherwise corrupted
             try:
                 data, n_reads, read_buffer[0] = parsers.parse_read(
-                    raw, sep=plotter.delimiter
+                    read_buffer[0] + raw, sep=plotter.delimiter
                 )
 
                 # Proceed if we actually read in data
@@ -99,9 +101,6 @@ async def daq_stream_async(
                         plotter.data += data
             except:
                 pass
-
-        if monitor.streaming:
-            monitor.data += raw.decode()
 
         # Sleep 80% of the time before we need to start reading chunks
         await asyncio.sleep(0.8 * n_reads_per_chunk * delay / 1000)
@@ -115,15 +114,7 @@ async def port_search_async(serial_connection):
         if ports != serial_connection.ports:
             serial_connection.ports = [port for port in ports]
 
-            options = [
-                port_name.device
-                + (
-                    "  " + port_name.manufacturer
-                    if port_name.manufacturer is not None
-                    else ""
-                )
-                for port_name in ports
-            ]
+            options = [device_name(port_name) for port_name in ports]
 
             # Dictionary of port names and name in port selector
             serial_connection.available_ports = {
@@ -139,6 +130,26 @@ async def port_search_async(serial_connection):
 
         # Sleep a second before searching again
         await asyncio.sleep(1)
+
+
+def device_name(port):
+    """Generate a name for a device at a given port."""
+    device = port.device + "  "
+
+    # There there is an HWID record, use it, otherwise use manufacturer
+    try:
+        i = port.hwid.find("VID:PID=") + 8
+        j = port.hwid.find(" ", i)
+        vid_pid = port.hwid[i:j]
+        if vid_pid in boards.vid_pid_boards:
+            device += boards.vid_pid_boards[vid_pid]
+        else:
+            device += vid_pid
+    except:
+        if port_name.manufacturer is not None:
+            device += port.manufacturer
+
+    return device
 
 
 def handshake_board(ser, sleep_time=1):

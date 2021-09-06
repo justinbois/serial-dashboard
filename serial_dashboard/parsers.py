@@ -140,7 +140,7 @@ def data_to_dicts(data, max_cols, time_col, time_units, starting_time_ind):
 
     ts = []
     ys = []
-    if time_col is None:
+    if time_col == "none":
         t = starting_time_ind + np.arange(len(data))
         for j in range(min(data.shape[1], max_cols)):
             new_t = []
@@ -177,3 +177,52 @@ def data_to_dicts(data, max_cols, time_col, time_units, starting_time_ind):
                 ys.append(new_y)
 
     return [dict(t=t, y=y) for t, y in zip(ts, ys)]
+
+
+def _delimiter_convert(delimiter):
+    if delimiter == "comma":
+        return ","
+    elif delimiter == "space":
+        return " "
+    elif delimiter == "tab":
+        return "\t"
+    elif delimiter == "whitespace":
+        return "whitespace"
+    elif delimiter == "vertical line":
+        return "|"
+    elif delimiter == "semicolon":
+        return ";"
+    elif delimiter == "asterisk":
+        return "*"
+    elif delimiter == "slash":
+        return "/"
+
+
+def _column_labels_str_to_list(col_labels, delimiter, max_cols):
+    if len(col_labels) == 0:
+        return [str(col) for col in range(max_cols)]
+
+    if delimiter == "whitespace":
+        col_labels = col_labels.split()
+    else:
+        col_labels = col_labels.split(delimiter)
+
+    if len(col_labels) > max_cols:
+        col_labels = col_labels[:max_cols]
+    elif len(col_labels) < max_cols:
+        col_labels += [str(col) for col in range(len(col_labels), max_cols)]
+
+    return col_labels
+
+
+def _xaxis_label(time_column, time_units):
+    if time_column == "none":
+        label = "sample number"
+    elif time_units in ("µs", "ms", "s"):
+        label = "time (s)"
+    elif time_units == "none":
+        label = "time"
+    else:
+        label = f"time ({time_units})"
+
+    return label
