@@ -12,6 +12,10 @@ import bokeh.io
 import bokeh.layouts
 import bokeh.driving
 
+from bokeh.server.server import Server
+from bokeh.application import Application
+from bokeh.application.handlers.function import FunctionHandler
+
 from . import boards
 from . import callbacks
 from . import comms
@@ -58,8 +62,127 @@ allowed_rollover = (100, 200, 400, 800, 1600, 3200)
 max_max_cols = 10
 
 
+def _check_baudrate(baudrate):
+    if baudrate not in allowed_baudrates:
+        err_str = "Inputted baudrate {baudrate} is not allowed. Allowed baudrates (in units of baud = bits per second) are: \n"
+
+        for br in allowed_baudrates:
+            err_str += f"  {br}\n"
+
+        raise RuntimeError(err_str)
+
+
+def _check_maxcols(maxcols):
+    if maxcols < 1 or maxcols > max_max_cols:
+        raise RuntimeError(
+            f"Inputted maxcols {maxcols} is invalid. maxcols must be between 1 and {max_max_cols}."
+        )
+
+
+def _check_delimiter(delimiter):
+    if delimiter not in allowed_delimiters:
+        err_str = f'Inputted delimiter "{delimiter}" is not allowed. Allowed delimiters are: \n'
+
+        for dl in allowed_delimiters:
+            err_str += f"  {dl}\n"
+
+        raise RuntimeError(err_str)
+
+
+def _check_timecolumn(timecolumn, maxcols):
+    if timecolumn == "none":
+        return None
+
+    try:
+        timecolumn = int(timecolumn)
+    except:
+        raise RuntimeError(
+            "Inputted timecolumn {timecolumn} is invalid. timecolumn must be an integer."
+        )
+
+    if timecolumn < 0 or timecolumn >= maxcols:
+        raise RuntimeError(
+            f"Inputted timecolumn {timecolumn} is invalid. Must have 0 ≤ timecolumn < maxcols. You have selected maxcols = {maxcols}."
+        )
+
+
+def _check_timeunits(timeunits):
+    if timeunits not in allowed_timeunits:
+        err_str = f'Inputted timeunits "{timeunits}" is not allowed. Allowed time units are: \n'
+
+        for tu in allowed_timeunits:
+            err_str += f"  {tu}\n"
+
+        raise RuntimeError(err_str)
+
+
+def _check_rollover(rollover):
+    if rollover not in allowed_rollover:
+        err_str = f'Inputted rollover "{rollover}" is not allowed. Allowed rollover values are: \n'
+
+        for ro in allowed_rollover:
+            err_str += f"  {ro}\n"
+
+        raise RuntimeError(err_str)
+
+
+def _check_inputtype(inputtype):
+    if inputtype not in ["ascii", "bytes"]:
+        raise RuntimeError(
+            'Inputted input type "{inputtype}" is not allowed. Must be either "ascii" or "bytes".'
+        )
+
+
+def _check_glyph(glyph):
+    if glyph not in allowed_glyphs:
+        err_str = (
+            f'  Inputted glyph "{glyph}" is not allowed. Allowed glyph choises are: \n'
+        )
+
+        for g in allowed_glyphs:
+            err_str += f"  {g}\n"
+
+        raise RuntimeError(err_str)
+
+
 class SerialConnection(object):
-    def __init__(self, baudrate=115200):
+    """Details about a serial connection.
+
+    Attributes
+    ----------
+    ser : serial.Serial instance
+        Serial connection to a device.
+    port : str
+        Name of the port of the connection.
+    baudrate : int
+        Baud rate of the connection
+    ports : list
+        List of ports that are available.
+    available_ports : dict
+        A dictionary with the convenient (pretty) port names as keys and
+        strings with the name of the ports such that they can be opened
+        with `serial.Serial()` as values.
+    reverse_available_ports : dict
+        A dictionary with the convenient (pretty) port names as values
+        and strings with the name of the ports such that they can be
+        opened with `serial.Serial()` as keys.
+    port_status : str
+        The status of the port. Either "disconnected", "establishing",
+        "connected", or "failed".
+    daq_task : async task
+        Task for data acquisition.
+    daq_delay : float
+        Approximate time, in milliseconds, between data acquisitions.
+    port_search_task : async task
+        Task for checking for available ports.
+    port_search_delay : float
+        Approximate time, in milliseconds, between checks of available
+        ports.
+    kill_app : bool
+        If True, kill the connect/app.
+    """
+
+    def __init__(self, baudrate=115200, daq_delay=20, port_search_delay=1000):
         """Create an instance storing information about a serial
         connection."""
         self.ser = None
@@ -70,7 +193,9 @@ class SerialConnection(object):
         self.reverse_available_ports = dict()
         self.port_status = "disconnected"
         self.daq_task = None
+        self.daq_delay = daq_delay
         self.port_search_task = None
+        self.port_search_delay = port_search_delay
         self.kill_app = False
 
 
@@ -169,7 +294,7 @@ class Controls(object):
         )
 
         # Set up port selector
-        self.port = bokeh.models.Select(title="port", options=[], value="", width=200,)
+        self.port = bokeh.models.Select(title="port", options=[], value="", width=200)
 
         # Set up baud rate with Arduino defaults
         self.baudrate = bokeh.models.Select(
@@ -310,7 +435,15 @@ class SerialPlotter(object):
 
 class SerialMonitor(object):
     def __init__(self, scroll_snap=True):
-        """Create a serial monitor."""
+        """Create a serial monitor.
+
+        Parameters
+        ----------
+        scroll_snap : bool, default True
+            If True, use CSS scroll-snap in serial monitor. This should
+            only be set to False for an old browser that does not have
+            CSS scroll-snap.
+        """
         # Use CSS scroll-snap to enable scrolling with default at bottom
         self.base_text = """<style>
 .monitorHeader {
@@ -351,7 +484,7 @@ class SerialMonitor(object):
 
         # As an alternative, can use text below. This is a hacky way to do
         # it with some rotations. The scroll bar will be on the left, and
-        # mouse scrolling directions will be reversed from their usual.
+        # mouse scroll wheel directions will be reversed from their usual.
         # This method may be useful for older browsers that do not have
         # CSS scroll-snap.
         self.alternative_base_text = """<style>
@@ -403,8 +536,23 @@ class SerialMonitor(object):
         self.streaming = False
 
 
-def layout(plotter, monitor, controls):
-    """Build layout of serial dashboard."""
+def _layout(plotter, monitor, controls):
+    """Build layout of serial dashboard.
+
+    Parameters
+    ----------
+    plotter : serial_dashboard.SerialPlotter instance
+        Instance of plot and related data structures.
+    monitor : serial_dashboard.SerialMonitor instance
+        Instance of monitor and related data structures.
+    controls : serial_dashboard.Controls instance
+        Instance of widget controls.
+
+    Returns
+    -------
+    output : bokeh.models.layouts.Row instance
+        Layout of the dashboard.
+    """
     plotter_buttons = bokeh.layouts.column(
         bokeh.models.Spacer(height=20),
         controls.plot_stream,
@@ -511,17 +659,20 @@ def app(
     maxcols=10,
     delimiter="comma",
     columnlabels="",
-    timecolumn="none",
+    timecolumn=None,
     timeunits="ms",
     rollover=400,
     glyph="lines",
     inputtype="ascii",
     fileprefix="_tmp",
+    daqdelay=20,
+    streamdelay=90,
+    portsearchdelay=1000,
 ):
     """Returns a function that can be used as a Bokeh app.
 
-    The app can be launched using `bokeh serve --show appscript.py`,
-    from the command line where the contents of `appscript.py` are:
+    The app can be launched using `bokeh serve --show launchscript.py`,
+    from the command line where the contents of `launchscript.py` are:
 
     ```
     import bokeh.plotting
@@ -533,6 +684,14 @@ def app(
     ```
 
     To launch the app programmatically with Python, do the following:
+
+    This function should only be used if you need to programmatically
+    access the app builder, for example for using the dashboard within
+    a Jupyter notebook. To launch a dashboard in its own browser window,
+    use `launch()` instead.
+
+    Alternatively, if you want to launch in its own browser window
+    programmatically, you can do the following.
 
     ```
     from bokeh.server.server import Server
@@ -547,11 +706,85 @@ def app(
     server.show('/serial-dashboard')
     server.run_until_shutdown()
     ```
+
+    Parameters
+    ----------
+    port : int, default 5006
+        Port at localhost for serving dashboard.
+    browser : str, default None
+        Browser to use for dashboard. If None, uses OS default.
+    baudrate : int, default 115200
+        Baud rate of serial connection. Allowed values are 300, 1200,
+        2400, 4800, 9600, 19200, 38400, 57600, 74880, 115200, 230400,
+        250000, 500000, 1000000, 2000000.
+    maxcols : int, default 10
+        Maximum number of columns of data coming off of the board.
+    delimiter : str, default "comma"
+        Delimiter of data coming off of the board. Allowed values are
+        "comma", "space", "tab", "whitespace", "vertical line",
+        "semicolon", "asterisk", "slash"
+    columnlabels : str, default ""
+        Labels for columnbs using the delimiter specified with
+        `delimiter` keyword argument.
+    timecolumn : int, default None
+        Column (zero-indexed) of incoming data that specifies time
+    timeunits : str, default "ms"
+        Units of incoming time data. Allowed values are "none", "µs",
+        "ms", "s", "min", "hr".
+    rollover : int, default 400
+        Number of data points to be shown on a plot for each column.
+        Allowed values are 100, 200, 400, 800, 1600, 3200.
+    glyph : str, default "lines"
+        Which glyphs to display in the plotter. Allowed values are
+        "lines", "dots", "both".
+    inputtype : str, default "ascii"
+        Whether input sent to the board is ASCII or bytes. Allowed
+        values are "ascii", "bytes".
+    fileprefix : str, default "_tmp"
+        Prefix for output files
+    daqdelay : float, default 20.0
+        Roughly the delay in data acquisition from the board in
+        milliseconds. The true delay is a bit above 80% of this value.
+    streamdelay : int, default 90
+        Delay between updates of the plotter and monitor in
+        milliseconds.
+    portsearchdelay : int, default 1000
+        Delay between checks of connected serial devices in
+        milliseconds.
     """
+    # Time column is expected to be a string or an integer
+    if timecolumn is None:
+        timecolumn = "none"
+
+    # We can be a bit flexible on delimiters
+    delimiter_conversion = {
+        ",": "comma",
+        " ": "space",
+        "\t": "tab",
+        "\s": "whitespace",
+        "|": "vertical line",
+        ";": "semicolon",
+        "*": "asterisk",
+        "/": "slash",
+    }
+    if delimiter in delimiter_conversion:
+        delimiter = delimiter_conversion[delimiter]
+
+    # Check inputs
+    _check_baudrate(baudrate),
+    _check_maxcols(maxcols),
+    _check_delimiter(delimiter),
+    _check_timecolumn(timecolumn, maxcols),
+    _check_timeunits(timeunits),
+    _check_rollover(rollover),
+    _check_glyph(glyph),
+    _check_inputtype(inputtype),
 
     def _app(doc):
         # "Global" variables
-        serial_connection = SerialConnection(baudrate)
+        serial_connection = SerialConnection(
+            baudrate, daq_delay=daqdelay, port_search_delay=portsearchdelay
+        )
         controls = Controls(
             baudrate=baudrate,
             max_cols=maxcols,
@@ -575,7 +808,7 @@ def app(
         )
         monitor = SerialMonitor()
 
-        app_layout = layout(plotter, monitor, controls)
+        app_layout = _layout(plotter, monitor, controls)
 
         # Start port sniffer
         serial_connection.port_search_task = asyncio.create_task(
@@ -742,7 +975,93 @@ def app(
         doc.add_root(app_layout)
 
         # Add periodic callbacks to doc
-        pc = doc.add_periodic_callback(_stream_update, 90)
-        pc_port = doc.add_periodic_callback(_port_search_update, 1000)
+        pc = doc.add_periodic_callback(_stream_update, streamdelay)
+        pc_port = doc.add_periodic_callback(_port_search_update, portsearchdelay)
 
     return _app
+
+
+def launch(
+    port=5006,
+    browser=None,
+    baudrate=115200,
+    maxcols=10,
+    delimiter="comma",
+    columnlabels="",
+    timecolumn=None,
+    timeunits="ms",
+    rollover=400,
+    glyph="lines",
+    inputtype="ascii",
+    fileprefix="_tmp",
+    daqdelay=20,
+    streamdelay=90,
+    portsearchdelay=1000,
+):
+    """Launch a serial dashboard.
+
+    Parameters
+    ----------
+    port : int, default 5006
+        Port at localhost for serving dashboard.
+    browser : str, default None
+        Browser to use for dashboard. If None, uses OS default.
+    baudrate : int, default 115200
+        Baud rate of serial connection. Allowed values are 300, 1200,
+        2400, 4800, 9600, 19200, 38400, 57600, 74880, 115200, 230400,
+        250000, 500000, 1000000, 2000000.
+    maxcols : int, default 10
+        Maximum number of columns of data coming off of the board.
+    delimiter : str, default "comma"
+        Delimiter of data coming off of the board. Allowed values are
+        "comma", "space", "tab", "whitespace", "vertical line",
+        "semicolon", "asterisk", "slash"
+    columnlabels : str, default ""
+        Labels for columnbs using the delimiter specified with
+        `delimiter` keyword argument.
+    timecolumn : int, default None
+        Column (zero-indexed) of incoming data that specifies time
+    timeunits : str, default "ms"
+        Units of incoming time data. Allowed values are "none", "µs",
+        "ms", "s", "min", "hr".
+    rollover : int, default 400
+        Number of data points to be shown on a plot for each column.
+        Allowed values are 100, 200, 400, 800, 1600, 3200.
+    glyph : str, default "lines"
+        Which glyphs to display in the plotter. Allowed values are
+        "lines", "dots", "both".
+    inputtype : str, default "ascii"
+        Whether input sent to the board is ASCII or bytes. Allowed
+        values are "ascii", "bytes".
+    fileprefix : str, default "_tmp"
+        Prefix for output files
+    daqdelay : float, default 20.0
+        Roughly the delay in data acquisition from the board in
+        milliseconds. The true delay is a bit above 80% of this value.
+    streamdelay : int, default 90
+        Delay between updates of the plotter and monitor in
+        milliseconds.
+    portsearchdelay : int, default 1000
+        Delay between checks of connected serial devices in
+        milliseconds.
+    """
+    # Build app
+    dashboard_app = app(
+        baudrate=baudrate,
+        maxcols=maxcols,
+        delimiter=delimiter,
+        columnlabels=columnlabels,
+        timecolumn=timecolumn,
+        timeunits=timeunits,
+        rollover=rollover,
+        glyph=glyph,
+        inputtype=inputtype,
+        fileprefix=fileprefix,
+        streamdelay=streamdelay,
+        portsearchdelay=portsearchdelay,
+    )
+
+    app_dict = {"/serial-dashboard": Application(FunctionHandler(dashboard_app))}
+    server = Server(app_dict, port=port)
+    server.show("/serial-dashboard", browser=browser)
+    server.run_until_shutdown()

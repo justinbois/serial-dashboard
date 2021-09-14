@@ -1,13 +1,8 @@
 import click
-
-from bokeh.server.server import Server
-from bokeh.application import Application
-from bokeh.application.handlers.function import FunctionHandler
-
 import serial_dashboard
 
 
-def _check_baudrate(baudrate):
+def _check_baudrate_cli(baudrate):
     if baudrate not in serial_dashboard.allowed_baudrates:
         click.echo("  ERROR", err=True)
         click.echo(
@@ -25,7 +20,7 @@ def _check_baudrate(baudrate):
         return True
 
 
-def _check_maxcols(maxcols):
+def _check_maxcols_cli(maxcols):
     if maxcols < 1 or maxcols > serial_dashboard.max_max_cols:
         click.echo("  ERROR", err=True)
         click.echo(
@@ -39,7 +34,7 @@ def _check_maxcols(maxcols):
         return True
 
 
-def _check_delimiter(delimiter):
+def _check_delimiter_cli(delimiter):
     if delimiter not in serial_dashboard.allowed_delimiters:
         click.echo("  ERROR", err=True)
         click.echo(
@@ -57,7 +52,7 @@ def _check_delimiter(delimiter):
         return True
 
 
-def _check_timecolumn(timecolumn, maxcols):
+def _check_timecolumn_cli(timecolumn, maxcols):
     if timecolumn == "none":
         return True
 
@@ -85,20 +80,8 @@ def _check_timecolumn(timecolumn, maxcols):
 
     return True
 
-    if maxcols < 1 or maxcols > serial_dashboard.max_max_cols:
-        click.echo("  ERROR", err=True)
-        click.echo(
-            f"  Inputted maxcols {maxcols} is invalid. maxcols must be between 1 and {serial_dashboard.max_max_cols}.",
-            err=True,
-        )
-        click.echo("")
 
-        return False
-    else:
-        return True
-
-
-def _check_timeunits(timeunits):
+def _check_timeunits_cli(timeunits):
     if timeunits not in serial_dashboard.allowed_timeunits:
         click.echo("  ERROR", err=True)
         click.echo(
@@ -116,7 +99,7 @@ def _check_timeunits(timeunits):
         return True
 
 
-def _check_rollover(rollover):
+def _check_rollover_cli(rollover):
     if rollover not in serial_dashboard.allowed_rollover:
         click.echo("  ERROR", err=True)
         click.echo(
@@ -134,7 +117,7 @@ def _check_rollover(rollover):
         return True
 
 
-def _check_inputtype(inputtype):
+def _check_inputtype_cli(inputtype):
     if inputtype not in ["ascii", "bytes"]:
         click.echo("  ERROR", err=True)
         click.echo(
@@ -149,7 +132,7 @@ def _check_inputtype(inputtype):
         return True
 
 
-def _check_glyph(glyph):
+def _check_glyph_cli(glyph):
     if glyph not in serial_dashboard.allowed_glyphs:
         click.echo("  ERROR", err=True)
         click.echo(
@@ -167,20 +150,20 @@ def _check_glyph(glyph):
         return True
 
 
-def _check_inputs(
+def _check_inputs_cli(
     baudrate, maxcols, delimiter, timecolumn, timeunits, rollover, glyph, inputtype,
 ):
     inputtype = inputtype.lower()
 
     results = [
-        _check_baudrate(baudrate),
-        _check_maxcols(maxcols),
-        _check_delimiter(delimiter),
-        _check_timecolumn(timecolumn, maxcols),
-        _check_timeunits(timeunits),
-        _check_rollover(rollover),
-        _check_glyph(glyph),
-        _check_inputtype(inputtype),
+        _check_baudrate_cli(baudrate),
+        _check_maxcols_cli(maxcols),
+        _check_delimiter_cli(delimiter),
+        _check_timecolumn_cli(timecolumn, maxcols),
+        _check_timeunits_cli(timeunits),
+        _check_rollover_cli(rollover),
+        _check_glyph_cli(glyph),
+        _check_inputtype_cli(inputtype),
     ]
 
     for res in results:
@@ -191,18 +174,82 @@ def _check_inputs(
 
 
 @click.command()
-@click.option("--port", default=5006, type=int)
-@click.option("--browser", default=None)
-@click.option("--baudrate", default=115200, type=int)
-@click.option("--maxcols", default=10, type=int)
-@click.option("--delimiter", default="comma")
-@click.option("--columnlabels", default="")
-@click.option("--timecolumn", default="none")
-@click.option("--timeunits", default="ms")
-@click.option("--rollover", default=400, type=int)
-@click.option("--glyph", default="lines")
-@click.option("--inputtype", default="ascii")
-@click.option("--fileprefix", default="_tmp")
+@click.option(
+    "--port",
+    default=5006,
+    type=int,
+    help="port at localhost for serving dashboard (default 5006)",
+)
+@click.option(
+    "--browser",
+    default=None,
+    help="browser to use for dashboard (defaults to OS default)",
+)
+@click.option(
+    "--baudrate",
+    default=115200,
+    type=int,
+    help="baud rate of serial connection (default 115200)",
+)
+@click.option(
+    "--maxcols",
+    default=10,
+    type=int,
+    help="maximum number of columns of data coming off of the board (default 10)",
+)
+@click.option(
+    "--delimiter",
+    default="comma",
+    help="delimiter of data coming off of the board (default comma)",
+)
+@click.option(
+    "--columnlabels",
+    default="",
+    help="labels for columns using delimiter specified with --delimiter flag (default is none)",
+)
+@click.option(
+    "--timecolumn",
+    default="none",
+    help="column (zero-indexed) of incoming data that specifies time (default none)",
+)
+@click.option(
+    "--timeunits", default="ms", help="units of incoming time data (default ms)"
+)
+@click.option(
+    "--rollover",
+    default=400,
+    type=int,
+    help="number of data points to be shown on a plot for each column (default 400)",
+)
+@click.option(
+    "--glyph",
+    default="lines",
+    help="which glyphs to display in the plotter; either lines, dots, or both (default lines)",
+)
+@click.option(
+    "--inputtype",
+    default="ascii",
+    help="whether input is ascii or bytes (default ascii)",
+)
+@click.option("--fileprefix", default="_tmp", help="prefix of output files")
+@click.option(
+    "--daqdelay",
+    default=90,
+    type=int,
+    help="approximate delay in milliseconds for data acquisition from the board (default 20)",
+)
+@click.option(
+    "--streamdelay",
+    default=90,
+    type=int,
+    help="delay in milliseconds between updates of the plotter and monitor (default 90)",
+)
+@click.option(
+    "--portsearchdelay",
+    default=1000,
+    type=int,
+    help="delay in milliseconds for checks of serial devices (default 1000)",
+)
 def cli(
     port,
     browser,
@@ -216,14 +263,18 @@ def cli(
     glyph,
     inputtype,
     fileprefix,
+    daqdelay,
+    streamdelay,
+    portsearchdelay,
 ):
-    """Launch dashboard from command line"""
+    """Launch a serial dashboard from the command line."""
 
-    if _check_inputs(
+    if _check_inputs_cli(
         baudrate, maxcols, delimiter, timecolumn, timeunits, rollover, glyph, inputtype,
     ):
-        # Build app
-        app = serial_dashboard.app(
+        serial_dashboard.launch(
+            port=port,
+            browser=browser,
             baudrate=baudrate,
             maxcols=maxcols,
             delimiter=delimiter,
@@ -234,9 +285,7 @@ def cli(
             glyph=glyph,
             inputtype=inputtype,
             fileprefix=fileprefix,
+            daqdelay=daqdelay,
+            streamdelay=streamdelay,
+            portsearchdelay=portsearchdelay,
         )
-
-        app_dict = {"/serial-dashboard": Application(FunctionHandler(app))}
-        server = Server(app_dict, port=port)
-        server.show("/serial-dashboard", browser=browser)
-        server.run_until_shutdown()

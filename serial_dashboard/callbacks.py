@@ -49,9 +49,7 @@ def _update_legend(plotter):
     elif plotter.dots_visible:
         plotter.legend.items = [
             bokeh.models.LegendItem(label=col_label, renderers=[dot], index=col)
-            for col, (col_label, dot) in enumerate(
-                zip(active_col_labels, plotter.dots)
-            )
+            for col, (col_label, dot) in enumerate(zip(active_col_labels, plotter.dots))
         ]
 
 
@@ -184,11 +182,10 @@ def port_connect_callback(plotter, monitor, controls, serial_connection):
 
         # Start DAQ
         serial_connection.daq_task = asyncio.create_task(
-            comms.daq_stream_async(
+            comms.daq_stream(
                 plotter,
                 monitor,
                 serial_connection,
-                delay=20,
                 n_reads_per_chunk=1,
                 reader=comms.read_all,
             )
