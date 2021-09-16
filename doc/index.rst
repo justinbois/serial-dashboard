@@ -16,7 +16,8 @@ This package provides a browser-based dashboard as a Python replacement for the 
    :maxdepth: 2
    :caption: User guide
 
-   user_guide/user_guide.ipynb
+   user_guide/launch
+   user_guide/usage
    user_guide/api
 
 
@@ -24,4 +25,4 @@ This package provides a browser-based dashboard as a Python replacement for the 
    :maxdepth: 1
    :caption: License and citation
 
-   credits_and_citation.rst
+   credits_and_citation

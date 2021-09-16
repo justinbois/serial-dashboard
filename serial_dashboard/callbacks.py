@@ -160,25 +160,11 @@ def port_connect_callback(plotter, monitor, controls, serial_connection):
         pass
     serial_connection.port_search_task = None
 
+    # Establish connection
     try:
-        # Close the connection if open
-        if serial_connection.ser is not None:
-            try:
-                serial_connection.ser.close()
-                serial_connection.ser = None
-            except:
-                pass
-
-        # Give message that connection is being established
-        # (Won't show up because still inside Bokeh's event loop; to be fixed.)
-        serial_connection.port_status = "establishing"
-        port_status_callback(plotter, monitor, controls, serial_connection)
-
-        # Open the connection and handshake with the serial device
-        serial_connection.ser = serial.Serial(
-            serial_connection.port, baudrate=serial_connection.baudrate
+        serial_connection.connect(
+            serial_connection.port, allow_disconnect=True, handshake=True
         )
-        comms.handshake_board(serial_connection.ser)
 
         # Start DAQ
         serial_connection.daq_task = asyncio.create_task(
@@ -209,7 +195,6 @@ def port_connect_callback(plotter, monitor, controls, serial_connection):
         controls.input_send.disabled = False
 
         #  Update status
-        serial_connection.port_status = "connected"
         port_status_callback(plotter, monitor, controls, serial_connection)
     except:
         serial_connection.port_status = "failed"
@@ -244,7 +229,7 @@ def port_disconnect_callback(plotter, monitor, controls, serial_connection):
 
     # Start port sniffer
     serial_connection.port_search_task = asyncio.create_task(
-        comms.port_search_async(serial_connection)
+        comms.port_search(serial_connection)
     )
 
     # Update port status

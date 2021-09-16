@@ -146,26 +146,38 @@ def _check_glyph(glyph):
 
 
 class SerialConnection(object):
-    """Details about a serial connection.
+    """Class containing details about a serial connection.
 
     Attributes
     ----------
     ser : serial.Serial instance
         Serial connection to a device.
     port : str
-        Name of the port of the connection.
+        Name of the port of the connection. This is not the device name,
+        but a descriptive name.
     baudrate : int
         Baud rate of the connection
+    bytesize : int
+        Number of data bits. Possible values: serial.FIVEBITS,
+        serial.SIXBITS, serial.SEVENBITS, serial.EIGHTBITS
+    parity : int
+        Enable parity checking. Possible values: serial.PARITY_NONE,
+        serial.PARITY_EVEN, serial.PARITY_ODD, serial.PARITY_MARK,
+        serial.PARITY_SPACE.
+    stopbits : int
+        Number of stop bits. Possible values: serial.STOPBITS_ONE,
+        serial.STOPBITS_ONE_POINT_FIVE, serial.STOPBITS_TWO
     ports : list
-        List of ports that are available.
+        List of ports that are available. Each entry is a
+        serial.tools.list_ports_common.ListPortInfo instance.
     available_ports : dict
-        A dictionary with the convenient (pretty) port names as keys and
-        strings with the name of the ports such that they can be opened
-        with `serial.Serial()` as values.
+        A dictionary with the descriptive port names as keys and strings
+        with the name of the ports such that they can be opened with
+        `serial.Serial()` as values.
     reverse_available_ports : dict
-        A dictionary with the convenient (pretty) port names as values
-        and strings with the name of the ports such that they can be
-        opened with `serial.Serial()` as keys.
+        A dictionary with the descriptive port names as values and
+        strings with the name of the ports such that they can be opened
+        with `serial.Serial()` as keys.
     port_status : str
         The status of the port. Either "disconnected", "establishing",
         "connected", or "failed".
@@ -182,12 +194,44 @@ class SerialConnection(object):
         If True, kill the connect/app.
     """
 
-    def __init__(self, baudrate=115200, daq_delay=20, port_search_delay=1000):
+    def __init__(
+        self,
+        port=None,
+        baudrate=115200,
+        daq_delay=20,
+        port_search_delay=1000,
+        bytesize=8,
+        parity="N",
+        stopbits=1,
+    ):
         """Create an instance storing information about a serial
-        connection."""
+        connection.
+
+        Parameters
+        ----------
+        port : str, default None
+            If given, name of the port to connect to. If None, no device
+            is connected.
+        baudrate : int
+            Baud rate of the connection
+        daq_delay : float
+            Approximate time, in milliseconds, between data acquisitions.
+        bytesize : int
+            Number of data bits. Possible values: serial.FIVEBITS,
+            serial.SIXBITS, serial.SEVENBITS, serial.EIGHTBITS
+        parity : int
+            Enable parity checking. Possible values: serial.PARITY_NONE,
+            serial.PARITY_EVEN, serial.PARITY_ODD, serial.PARITY_MARK,
+            serial.PARITY_SPACE.
+        stopbits : int
+            Number of stop bits. Possible values: serial.STOPBITS_ONE,
+            serial.STOPBITS_ONE_POINT_FIVE, serial.STOPBITS_TWO
+        """
         self.ser = None
-        self.port = None
         self.baudrate = baudrate
+        self.bytesize = bytesize
+        self.parity = parity
+        self.stopbits = stopbits
         self.ports = []
         self.available_ports = dict()
         self.reverse_available_ports = dict()
@@ -197,6 +241,114 @@ class SerialConnection(object):
         self.port_search_task = None
         self.port_search_delay = port_search_delay
         self.kill_app = False
+
+        # Attempt to connect to a port if provided
+        if port is None:
+            self.port = port
+        else:
+            self.connect(port)
+
+    def portsearch(self, on_change=True):
+        """Search for ports and update port information.
+
+        Parameters
+        ----------
+        on_change : bool, default True
+            If True, only update `ports`, `available_ports`, and
+            `reverse_available_ports` attributes if there was a change
+            in the available ports.
+        """
+        ports = serial.tools.list_ports.comports()
+
+        if not on_change or ports != self.ports:
+            self.ports = [port for port in ports]
+
+            options = [comms.device_name(port_name) for port_name in ports]
+
+            # Dictionary of port names and name in port selector
+            self.available_ports = {
+                port_name.device: option_name
+                for port_name, option_name in zip(ports, options)
+            }
+
+            # Reverse lookup for value in port selector to port name
+            self.reverse_available_ports = {
+                option_name: port_name.device
+                for port_name, option_name in zip(ports, options)
+            }
+
+    def connect(self, port, allow_disconnect=False, handshake=True):
+        """Connect to a port.
+
+        Parameters
+        ----------
+        port : str, int, or serial.tools.list_ports_common.ListPortInfo instance
+            Port to which to connect. If an int, connect to port given
+            by self.ports[port].
+        allow_disconnect : bool, default True
+            If already connected to a port, allow disconnection. If
+            False, raise an exception if already connected.
+        handshake : bool, default True
+            If True, "handshake" with the connected device by closing,
+            reopening connection waiting a second, and then clearing
+            the input buffer.
+        """
+        # Disconnect, if necessary
+        if self.ser is not None and self.ser.is_open:
+            if allow_disconnect:
+                try:
+                    self.ser.close()
+                    self.ser = None
+                except:
+                    pass
+
+                self.port_status = "disconnected"
+            elif raise_exceptions:
+                raise RuntimeError(f"Already connected to port {self.port}.")
+
+        # Match requested port with known port
+        if port in self.ports:
+            port = port.device
+        elif type(port) == int and port < len(self.ports):
+            port = self.ports[port].device
+        elif port in self.reverse_available_ports:
+            port = self.reverse_available_ports[port]
+        elif port not in self.available_ports:
+            # A port search hasn't been done that includes port being asked for
+            self.portsearch()
+
+        # Indentify the port we're trying to connect to
+        self.port = port
+
+        # Make the connection
+        try:
+            self.ser = serial.Serial(
+                port=self.port,
+                baudrate=self.baudrate,
+                bytesize=self.bytesize,
+                parity=self.parity,
+                stopbits=self.stopbits,
+            )
+            self.port_status = "connected"
+        except:
+            self.ser = None
+            self.port_status = "failed"
+
+            raise RuntimeError(f"Connection to port {port} failed.")
+
+        # Handshake
+        if handshake:
+            comms.handshake_board(self.ser)
+
+    def disconnect(self):
+        """Disconnect port."""
+        try:
+            self.ser.close()
+        except:
+            pass
+
+        self.ser = None
+        self.port_status = "disconnected"
 
 
 class Controls(object):
@@ -783,7 +935,7 @@ def app(
     def _app(doc):
         # "Global" variables
         serial_connection = SerialConnection(
-            baudrate, daq_delay=daqdelay, port_search_delay=portsearchdelay
+            baudrate=baudrate, daq_delay=daqdelay, port_search_delay=portsearchdelay
         )
         controls = Controls(
             baudrate=baudrate,
@@ -812,7 +964,7 @@ def app(
 
         # Start port sniffer
         serial_connection.port_search_task = asyncio.create_task(
-            comms.port_search_async(serial_connection)
+            comms.port_search(serial_connection)
         )
 
         # Define and link on_click callbacks

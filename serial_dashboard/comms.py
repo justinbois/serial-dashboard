@@ -63,7 +63,10 @@ def read_all_newlines(ser, read_buffer=b"", n_reads=1):
 
     Notes
     -----
-    .. This is a drop-in replacement for read_all().
+    .. This is a drop-in replacement for read_all(). It is not currently
+       used within the dashboard app, but can be useful if there are
+       issues reading a stream of data without newlines that is
+       sometimes encountered on Windows machines.
     """
     raw = read_buffer
     for _ in range(n_reads):
@@ -75,7 +78,26 @@ def read_all_newlines(ser, read_buffer=b"", n_reads=1):
 async def daq_stream(
     plotter, monitor, serial_connection, n_reads_per_chunk=1, reader=read_all
 ):
-    """Obtain streaming data"""
+    """Obtain streaming data
+
+    Parameters
+    ----------
+    plotter : SerialPlotter instance
+        Plotter displaying parsed data. plotter.data is updated in this
+        coroutine.
+    monitor : SerialMonitor instance
+        Monitor displaying data coming from the serial connection.
+        monitor.data is updated in this coroutine.
+    serial_connection : SerialConnection instance
+        Details about the serial connection
+    n_reads_per_chunk : int, default 1
+        This parameter is only used if `reader` is `read_all_newlines`.
+        `n_read_per_chunk` lines are read in.
+    reader : function, default read_all
+        Either `read_all` or `read_all_newlines`. `read_all_newlines` is
+        only necessary on some windows machines that have problems
+        reading in data that does not end with a newline.
+    """
     # Receive data
     read_buffer = [b""]
     while True:
@@ -108,7 +130,7 @@ async def daq_stream(
         )
 
 
-async def port_search_async(serial_connection):
+async def port_search(serial_connection):
     """Search for ports and update dictionary of ports.
 
     Parameters
@@ -116,29 +138,9 @@ async def port_search_async(serial_connection):
     serial_connection : SerialConnection instance
         The `available_ports` and `reverse_available_ports` attributes
         are updated by this coroutine.
-    sleep_time : int, default 1
-        The amount of time in seconds to sleep between executions of
-        this coroutine.
     """
     while True:
-        ports = serial.tools.list_ports.comports()
-
-        if ports != serial_connection.ports:
-            serial_connection.ports = [port for port in ports]
-
-            options = [device_name(port_name) for port_name in ports]
-
-            # Dictionary of port names and name in port selector
-            serial_connection.available_ports = {
-                port_name.device: option_name
-                for port_name, option_name in zip(ports, options)
-            }
-
-            # Reverse lookup for value in port selector to port name
-            serial_connection.reverse_available_ports = {
-                option_name: port_name.device
-                for port_name, option_name in zip(ports, options)
-            }
+        serial_connection.portsearch(on_change=True)
 
         # Sleep before searching again
         await asyncio.sleep(serial_connection.port_search_delay / 1000.0)
@@ -158,7 +160,7 @@ def device_name(port):
     output : str
         A name for the port. If there is an HWID record known to the
         serial-dashboard package, the name of the device is drawn from
-        that; otherwise, if availalbe, the name of the manufacturer is
+        that; otherwise, if available, the name of the manufacturer is
         used. If none of those are available, then `port.device`
         appended with two spaces is returned.
     """

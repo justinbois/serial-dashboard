@@ -3,7 +3,7 @@ import numpy as np
 
 
 def parse_read(read, sep=",", n_reads=0):
-    """Parse a read with time, voltage data
+    """Parse a read with incoming delimited data.
 
     Parameters
     ----------
@@ -11,17 +11,14 @@ def parse_read(read, sep=",", n_reads=0):
         Byte string with comma delimited time/voltage
         measurements.
     sep : str, default ','
-        Character separating columns of written data.
+        Delimiting character separating columns of written data.
     n_reads : int, default 0
         The number of reads that have previously been read in.
 
     Returns
     -------
-    time_ms : list of ints
-        Time points in milliseconds or read number if time_column is
-        None.
     data : list of ints
-        All non-time data read in.
+        Parsed data.
     n_reads : int
         Updated number of records read.
     remaining_bytes : byte string
@@ -82,9 +79,8 @@ def fill_nans(x, ncols):
 
     Notes
     -----
-    .. `x` is modified in place. Do not use this function if you want
-       `x` back.
-    .. There is no type-checking on `x`. It must be a list of lists.
+    - `x` is modified in place. Do not use this function if you want `x` back.
+    - There is no type-checking on `x`. It must be a list of lists.
     """
     if len(x) == 0:
         if ncols > 0:
@@ -112,7 +108,9 @@ def backfill_nans(x, ncols):
     Parameters
     ----------
     x : 2D Numpy array
-        Array to be NaN filled
+        Array to be NaN filled.
+    ncols : int
+        Number of columns in resulting array.
 
     Returns
     -------
@@ -133,6 +131,30 @@ def backfill_nans(x, ncols):
 def data_to_dicts(data, max_cols, time_col, time_units, starting_time_ind):
     """Take in data as a list of lists and converts to a list of
     dictionaries that can be used to stream into the ColumnDataSources.
+
+    Parameters
+    ----------
+    data : list of lists
+        Data to be converted into a dictionary.
+    max_cols : int
+        Maximum number of columns present in data set. This is usually
+        the maximum length of a one of the lists in `data`. If any of
+        the lists are longer than `max_cols`, the data in the list is
+        truncated.
+    time_col : int or "none"
+        Which column contains time data.
+    time_units : str
+        Units of time. If "µs", the time column is divided by a million.
+        If "ms", the time column is divided by a thousand.
+    starting_time_ind : int
+        Only active if `time_col == "none"`. The time column is indices
+        in this case, and they start with `starting_time_ind`.
+
+    Returns
+    -------
+    output : list of dicts
+        A list of dicts, each with keys "t" and "y", representing the
+        time and y-data to be updated in a plot.
     """
     data, ncols = fill_nans(copy.copy(data), 0)
     if len(data) == 0 or ncols == 0:
