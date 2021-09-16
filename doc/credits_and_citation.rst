@@ -18,9 +18,9 @@ It is best to cite the package using its DOI and version number. Here is a citat
 
 .. code-block:: bibtex
 
-    @misc{10.22002.D1.1614,
-      doi = {10.22002.D1.1614},
-      url = {http://dx.doi.org/10.22002/D1.1614},
+    @misc{10.22002/D1.2118,
+      doi = {10.22002/D1.2118},
+      url = {http://dx.doi.org/10.22002/D1.2118},
       author = {Bois, Justin S.},
       keywords = {Github},
       title = {justinbois/serial-dashboard: Version 0.1.0

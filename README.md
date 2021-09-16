@@ -1,5 +1,7 @@
 # serial-dashboard
 
+[![DOI](https://data.caltech.edu/badge/387582612.svg)](https://data.caltech.edu/badge/latestdoi/387582612)
+
 This package provides a browser-based dashboard as a Python replacement for the serial plotter and serial monitor of the Arduino IDE. It includes extra utilities, such as plotting of a time axis (as opposed to strictly sample number), ability to save data transferred over serial, and ability to start and stop streams.
 
 The documentation will soon be available [here](http://serial-dashboard.github.io/). For now, if you are feeling curious and/or brave, you can install it using
