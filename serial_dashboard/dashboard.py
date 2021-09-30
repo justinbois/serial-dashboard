@@ -826,14 +826,14 @@ def app(
     The app can be launched using `bokeh serve --show launchscript.py`,
     from the command line where the contents of `launchscript.py` are:
 
-    ```
-    import bokeh.plotting
-    import serial_dashboard
+    .. code-block:: python
 
-    app = serial_dashboard.app()
+        import bokeh.plotting
+        import serial_dashboard
 
-    app(bokeh.plotting.curdoc())
-    ```
+        app = serial_dashboard.app()
+
+        app(bokeh.plotting.curdoc())
 
     To launch the app programmatically with Python, do the following:
 
@@ -845,19 +845,19 @@ def app(
     Alternatively, if you want to launch in its own browser window
     programmatically, you can do the following.
 
-    ```
-    from bokeh.server.server import Server
-    from bokeh.application import Application
-    from bokeh.application.handlers.function import FunctionHandler
-    import serial_dashboard
+    .. code-block:: python
 
-    app = serial_dashboard.app()
+        from bokeh.server.server import Server
+        from bokeh.application import Application
+        from bokeh.application.handlers.function import FunctionHandler
+        import serial_dashboard
 
-    app_dict = {'/serial-dashboard': Application(FunctionHandler(app))}
-    server = Server(app_dict, port=5006)
-    server.show('/serial-dashboard')
-    server.run_until_shutdown()
-    ```
+        app = serial_dashboard.app()
+
+        app_dict = {'/serial-dashboard': Application(FunctionHandler(app))}
+        server = Server(app_dict, port=5006)
+        server.show('/serial-dashboard')
+        server.run_until_shutdown()
 
     Parameters
     ----------

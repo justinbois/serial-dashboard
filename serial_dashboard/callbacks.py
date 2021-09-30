@@ -148,7 +148,7 @@ def port_select_callback(plotter, monitor, controls, serial_connection):
 
 def baudrate_callback(plotter, monitor, controls, serial_connection):
     """Store the selected baudrate"""
-    serial_connection.baudrate = baudrate_select.value
+    serial_connection.baudrate = controls.baudrate.value
 
 
 def port_connect_callback(plotter, monitor, controls, serial_connection):
