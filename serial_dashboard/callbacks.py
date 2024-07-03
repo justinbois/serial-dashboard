@@ -75,7 +75,7 @@ def _populate_glyphs(plotter, colors=_colors):
 
     # Dots
     plotter.dots = [
-        plotter.plot.circle(source=source, x="t", y="y", color=color, size=3)
+        plotter.plot.scatter(source=source, x="t", y="y", color=color, size=3)
         for color, source in zip(colors[: plotter.max_cols], plotter.sources)
     ]
 

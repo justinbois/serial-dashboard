@@ -84,9 +84,9 @@ A dashboard may live within a Jupyter notebook. To enable this, use the ``serial
 
 	bokeh.io.show(dashboard_app)
 
-It you want the same defaults as in the above example, use
+If you want the same defaults as in the above example, use
 
-.. code-block::python
+.. code-block:: python
 
 	serial_dashboard.app(columnlabels="time (ms),signal,sine wave", maxcols=3, timecolumn=0)
 

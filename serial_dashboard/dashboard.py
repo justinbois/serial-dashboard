@@ -567,7 +567,7 @@ class SerialPlotter(object):
         phantom_source = bokeh.models.ColumnDataSource(
             data=dict(phantom_t=[0], phantom_y=[0])
         )
-        p.circle(source=phantom_source, x="phantom_t", y="phantom_y", visible=False)
+        p.scatter(source=phantom_source, x="phantom_t", y="phantom_y", visible=False)
 
         # Make an empty legend
         legend = bokeh.models.Legend(
